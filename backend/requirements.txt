@@ -11,3 +11,4 @@ flask-cors
 reportlab
 nltk
 rouge-score
+gunicorn
