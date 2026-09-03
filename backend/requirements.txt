@@ -1,0 +1,13 @@
+pymupdf
+pymongo
+google-genai
+python-dotenv
+rich
+sentence-transformers
+requests
+xmltodict
+flask
+flask-cors
+reportlab
+nltk
+rouge-score

@@ -1,0 +1,133 @@
+# =========================================================
+# MediCare AI - .gitignore
+# =========================================================
+
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# -------------------------
+# Environment & Secrets
+# -------------------------
+.env
+.env.*
+!.env.example
+
+# Credentials / Private Keys
+credentials.json
+service-account*.json
+*.pem
+*.key
+
+# -------------------------
+# Python Tools / Testing
+# -------------------------
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+
+# -------------------------
+# Jupyter Notebook
+# -------------------------
+.ipynb_checkpoints/
+
+# -------------------------
+# IDE / Editors
+# -------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# -------------------------
+# Operating System
+# -------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+logs/
+
+# -------------------------
+# Node.js / React
+# -------------------------
+node_modules/
+frontend/node_modules/
+
+# Vite
+frontend/.vite/
+frontend/dist/
+frontend/build/
+
+# Other frontend caches
+.cache/
+.parcel-cache/
+.turbo/
+
+# -------------------------
+# Build / Temporary Files
+# -------------------------
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# -------------------------
+# Medical Knowledge Base
+# -------------------------
+# Do NOT upload medical reference PDFs to GitHub
+data/documents/*.pdf
+
+# -------------------------
+# Generated Reports
+# -------------------------
+generated_reports/
+reports/
+*.pdf
+
+# -------------------------
+# Local AI / ML Models
+# -------------------------
+models/
+model_cache/
+.cache/
+.huggingface/
+
+# -------------------------
+# Local Databases
+# -------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# -------------------------
+# OS / Python Misc
+# -------------------------
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# -------------------------
+# Environment-specific files
+# -------------------------
+*.local
