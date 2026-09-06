@@ -1,18 +1,16 @@
 """
 MediCare AI - Retrieval Module
-
-Takes a user question and finds the most relevant
-medical chunks from MongoDB using Vector Search.
+Includes Medical Acronym Expansion, Query Enrichment, and MongoDB Vector Search.
 """
 
 import sys
 import os
+import re
 
-# Ensure backend root directory is in sys.path for direct script execution
+# Ensure backend root directory is in sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from google import genai
-from google.genai import types
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
@@ -29,148 +27,134 @@ COLLECTION_NAME = "medical_chunks"
 VECTOR_INDEX_NAME = "vector_index"
 EMBEDDING_DIMENSIONS = 768
 
-# Initialize Gemini client
+# Initialize Gemini client & MongoDB
 client = genai.Client(api_key=GOOGLE_API_KEY)
-
-# Initialize MongoDB
 mongo_client = MongoClient(MONGODB_URI)
 collection = mongo_client[DB_NAME][COLLECTION_NAME]
 
+# Comprehensive Medical Acronym & Abbreviation Dictionary
+MEDICAL_ACRONYMS = {
+    r"\bt2dm\b": "Type 2 Diabetes Mellitus",
+    r"\bt1dm\b": "Type 1 Diabetes Mellitus",
+    r"\bdm\b": "Diabetes Mellitus",
+    r"\bckd\b": "Chronic Kidney Disease",
+    r"\bakd\b": "Acute Kidney Injury",
+    r"\baki\b": "Acute Kidney Injury",
+    r"\bhtn\b": "Hypertension High Blood Pressure",
+    r"\bmi\b": "Myocardial Infarction Heart Attack",
+    r"\bcad\b": "Coronary Artery Disease",
+    r"\bchf\b": "Congestive Heart Failure",
+    r"\bhf\b": "Heart Failure",
+    r"\bcopd\b": "Chronic Obstructive Pulmonary Disease",
+    r"\bsob\b": "Shortness of Breath Dyspnea",
+    r"\bcva\b": "Cerebrovascular Accident Stroke",
+    r"\btia\b": "Transient Ischemic Attack",
+    r"\bdvt\b": "Deep Vein Thrombosis",
+    r"\bpe\b": "Pulmonary Embolism",
+    r"\bgurd\b": "Gastroesophageal Reflux Disease",
+    r"\bgerd\b": "Gastroesophageal Reflux Disease",
+    r"\bibd\b": "Inflammatory Bowel Disease",
+    r"\bibs\b": "Irritable Bowel Syndrome",
+    r"\bpcos\b": "Polycystic Ovary Syndrome",
+    r"\buti\b": "Urinary Tract Infection",
+    r"\burti\b": "Upper Respiratory Tract Infection",
+    r"\blrti\b": "Lower Respiratory Tract Infection",
+    r"\bafib\b": "Atrial Fibrillation",
+    r"\bsle\b": "Systemic Lupus Erythematosus",
+    r"\bra\b": "Rheumatoid Arthritis",
+    r"\boa\b": "Osteoarthritis",
+    r"\bptsd\b": "Post Traumatic Stress Disorder",
+    r"\bcbc\b": "Complete Blood Count",
+    r"\blft\b": "Liver Function Test",
+    r"\bkft\b": "Kidney Function Test",
+    r"\brft\b": "Renal Function Test",
+    r"\babg\b": "Arterial Blood Gas",
+    r"\bhba1c\b": "Glycated Hemoglobin HbA1c",
+    r"\bldl\b": "Low Density Lipoprotein Cholesterol",
+    r"\bhdl\b": "High Density Lipoprotein Cholesterol",
+    r"\btg\b": "Triglycerides",
+    r"\bcrp\b": "C-Reactive Protein",
+    r"\besr\b": "Erythrocyte Sedimentation Rate",
+    r"\begfr\b": "Estimated Glomerular Filtration Rate"
+}
 
-def embed_query(question):
+
+def expand_medical_acronyms(query: str) -> str:
     """
-    Convert user question into embedding vector using local embedder.
+    Expand standard medical abbreviations to full clinical terms.
+    Improves vector cosine similarity matching against medical textbooks.
+    """
+    expanded = query
+    for pattern, replacement in MEDICAL_ACRONYMS.items():
+        expanded = re.sub(pattern, replacement, expanded, flags=re.IGNORECASE)
+    return expanded
+
+
+def embed_query(question: str):
+    """
+    Convert query into 768-D embedding vector using lightweight embedder.
     """
     try:
         from embeddings.local_embedder import embed_single_text
-        return embed_single_text(question)
+        enriched_query = expand_medical_acronyms(question)
+        return embed_single_text(enriched_query)
     except Exception as e:
         print(f"Error embedding query: {e}")
         return None
 
 
-# Medical topic indicators (any of these = likely medical)
+# Medical topic indicators
 MEDICAL_KEYWORDS = [
-    # Symptoms/conditions
-    "symptom", "symptoms", "disease", "diseases", "condition",
-    "syndrome", "disorder", "infection", "illness", "sick",
-    "pain", "ache", "fever", "cough", "headache", "nausea",
-    
-    # Body parts
-    "heart", "lung", "kidney", "liver", "brain", "blood",
-    "bone", "muscle", "skin", "eye", "ear", "throat",
-    "stomach", "intestine", "chest", "back", "joint",
-    
-    # Medical actions
-    "diagnose", "diagnosis", "treatment", "treat", "cure",
-    "therapy", "medication", "medicine", "drug", "prescribe",
-    "surgery", "operation", "test", "screening", "examination",
-    
-    # Medical specialties/topics
-    "diabetes", "cancer", "hypertension", "asthma", "arthritis",
-    "pneumonia", "tuberculosis", "hepatitis", "hiv", "aids",
-    "stroke", "seizure", "epilepsy", "migraine",
-    
-    # Medical measures
-    "blood pressure", "heart rate", "temperature", "pulse",
-    "glucose", "cholesterol", "hemoglobin", "hba1c",
-    
-    # Anatomy
-    "artery", "vein", "nerve", "cell", "tissue", "organ",
-    "hormone", "enzyme", "antibody", "vaccine",
-    
-    # Medical roles
-    "doctor", "physician", "nurse", "patient", "hospital",
-    "clinic", "emergency", "medical", "health", "healthcare",
-    
-    # Common medical terms
-    "chronic", "acute", "benign", "malignant", "inflammation",
-    "swelling", "bleeding", "fracture", "wound",
+    "symptom", "symptoms", "disease", "diseases", "condition", "syndrome", "disorder",
+    "infection", "illness", "sick", "pain", "ache", "fever", "cough", "headache", "nausea",
+    "heart", "lung", "kidney", "liver", "brain", "blood", "bone", "muscle", "skin", "eye",
+    "ear", "throat", "stomach", "intestine", "chest", "back", "joint", "diagnose", "diagnosis",
+    "treatment", "treat", "cure", "therapy", "medication", "medicine", "drug", "prescribe",
+    "surgery", "operation", "test", "screening", "examination", "diabetes", "cancer",
+    "hypertension", "asthma", "arthritis", "pneumonia", "tuberculosis", "hepatitis", "hiv",
+    "aids", "stroke", "seizure", "epilepsy", "migraine", "blood pressure", "heart rate",
+    "glucose", "cholesterol", "hemoglobin", "hba1c", "doctor", "hospital", "clinic", "health",
+    "t2dm", "t1dm", "ckd", "aki", "copd", "gerd", "dvt", "uti", "cad", "chf"
 ]
 
-
-# Non-medical topic indicators (any of these = NOT medical)
 NON_MEDICAL_KEYWORDS = [
-    # Food/cooking
-    "recipe", "cook", "bake", "cooking", "baking", "meal",
-    "dinner", "breakfast", "lunch", "cuisine", "restaurant",
-    
-    # Technology
-    "python", "javascript", "code", "programming", "software",
-    "computer", "laptop", "phone", "app", "website", "coding",
-    
-    # Entertainment
-    "movie", "film", "song", "music", "game", "sport", "sports",
-    "celebrity", "actor", "singer", "book review", "novel",
-    
-    # Weather/travel
-    "weather", "temperature outside", "climate", "travel",
-    "vacation", "tourism", "flight", "hotel",
-    
-    # Money/business
-    "stock", "money", "investment", "bitcoin", "crypto",
-    "salary", "job", "career", "resume",
-    
-    # Random topics
-    "cookies", "cake", "pizza", "burger",
-    "programming language", "web development",
+    "recipe", "cook", "bake", "cooking", "baking", "meal", "dinner", "breakfast",
+    "python", "javascript", "code", "programming", "software", "computer", "laptop",
+    "movie", "film", "song", "music", "game", "sport", "sports", "celebrity",
+    "weather", "vacation", "tourism", "flight", "hotel", "stock", "bitcoin", "crypto"
 ]
 
 
-def is_medical_question(question):
-    """
-    Simple keyword-based check if question is medical.
-    
-    Returns:
-        "medical"     - Definitely medical
-        "non_medical" - Definitely NOT medical
-        "ambiguous"   - Unclear, needs further checking
-    """
+def is_medical_question(question: str) -> str:
     question_lower = question.lower()
-    
-    # Count matches
     medical_matches = sum(1 for kw in MEDICAL_KEYWORDS if kw in question_lower)
     non_medical_matches = sum(1 for kw in NON_MEDICAL_KEYWORDS if kw in question_lower)
     
-    # Clear non-medical
     if non_medical_matches > 0 and medical_matches == 0:
         return "non_medical"
-    
-    # Clear medical
     if medical_matches > 0 and non_medical_matches == 0:
         return "medical"
-    
-    # Both or neither - let vector search decide
     return "ambiguous"
 
 
-def get_non_medical_response():
-    """Return polite rejection for non-medical questions."""
-    return """I'm MediCare AI, designed to answer medical and healthcare questions.
+def get_non_medical_response() -> str:
+    return """I am MediCare AI, specialized in medical knowledge and clinical decision support.
 
-Your question doesn't appear to be medical in nature.
+Your question does not appear to be medical in nature.
 
-I can help you with:
-• Symptoms and diseases
-• Diagnoses and treatments  
-• Medications and therapies
-• Anatomy and physiology
-• Medical procedures
-• Health conditions
+I can assist you with:
+• Symptoms, Differential Diagnoses, and Diseases
+• Clinical Guidelines and First-Line Treatment Protocols
+• Laboratory Test Interpretation & Reference Ranges
+• Pharmacology, Mechanisms of Action, and Drug Interactions
+• Live NIH PubMed Research & Clinical Trial Evidence
 
-Please ask me a medical question, and I'll search my medical textbooks for you.
-
-Examples:
-• "What are the symptoms of diabetes?"
-• "How is pneumonia treated?"
-• "What causes chest pain?"
-"""
+Please ask a healthcare-related question."""
 
 
-def search_medical_chunks(question, top_k=12):
+def search_medical_chunks(question: str, top_k: int = 15):
     """
-    Search for top 12 medical chunks using MongoDB Vector Search.
-    Evaluates 200 candidate vectors for maximum retrieval precision.
+    Search top chunks in MongoDB Vector Search with 200 candidates.
     """
     query_embedding = embed_query(question)
     
@@ -201,110 +185,45 @@ def search_medical_chunks(question, top_k=12):
     ]
     
     try:
-        results = list(collection.aggregate(pipeline))
-        return results
+        return list(collection.aggregate(pipeline))
     except Exception as e:
         print(f"Search error: {e}")
         return []
 
 
-def display_results(question, results):
-    """Pretty print the search results."""
-    print("\n" + "=" * 70)
-    print(f"QUESTION: {question}")
-    print("=" * 70)
-    
-    if not results:
-        print("No results found.")
-        return
-    
-    print(f"Found {len(results)} relevant chunks:\n")
-    
-    for i, chunk in enumerate(results, 1):
-        print(f"--- Result {i} ---")
-        print(f"Source     : {chunk['book']}, Page {chunk['page']}")
-        print(f"Chunk ID   : {chunk['chunk_id']}")
-        print(f"Similarity : {chunk['score']:.4f}")
-        print(f"Text preview:")
-        print(f"  {chunk['text'][:300]}...")
-        print()
-
-
-# Emergency symptoms - trigger urgent warning
 EMERGENCY_KEYWORDS = [
-    "chest pain", "chest tightness", "heart attack",
-    "difficulty breathing", "cant breathe", "can't breathe",
-    "shortness of breath", "trouble breathing",
-    "severe bleeding", "heavy bleeding", "bleeding won't stop",
-    "unconscious", "passed out", "fainting",
-    "stroke", "face drooping", "arm weakness",
-    "severe headache", "worst headache",
-    "seizure", "convulsion", "fit",
-    "poisoning", "overdose",
-    "severe allergic reaction", "anaphylaxis",
-    "suicide", "self harm", "kill myself",
-    "severe abdominal pain", "severe stomach pain",
-    "vomiting blood", "coughing blood",
+    "chest pain", "chest tightness", "heart attack", "difficulty breathing",
+    "cant breathe", "can't breathe", "shortness of breath", "severe bleeding",
+    "unconscious", "passed out", "fainting", "stroke", "face drooping",
+    "severe headache", "seizure", "convulsion", "poisoning", "overdose",
+    "anaphylaxis", "suicide", "self harm", "vomiting blood", "coughing blood"
 ]
 
 
-def check_emergency(question):
-    """
-    Check if question mentions emergency symptoms.
-    
-    Returns:
-        True if emergency detected, False otherwise
-    """
-    question_lower = question.lower()
-    
-    for keyword in EMERGENCY_KEYWORDS:
-        if keyword in question_lower:
-            return True
-    
-    return False
+def check_emergency(question: str) -> bool:
+    q_low = question.lower()
+    return any(kw in q_low for kw in EMERGENCY_KEYWORDS)
 
 
-def get_emergency_message():
-    """Return the emergency warning message."""
+def get_emergency_message() -> str:
     return """
 🚨 MEDICAL EMERGENCY ALERT 🚨
 
-You may be describing a medical emergency.
+You may be describing symptoms of a critical medical emergency.
 
 IMMEDIATE ACTIONS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Call Emergency Services immediately:
+   • India: 102 / 108
+   • USA: 911 | UK: 999 | EU: 112
+2. Alert someone nearby immediately.
+3. Do not drive yourself; proceed to the nearest Emergency Department.
 
-1. Call emergency services NOW:
-   • India: 102 (Ambulance) or 108 (Emergency)
-   • USA: 911
-   • UK: 999
-   • EU: 112
-
-2. If someone is with you, tell them immediately.
-
-3. Do NOT wait for online information.
-
-4. Go to the nearest emergency room if possible.
-
-This app is for information only.
-Emergency situations require immediate professional help.
+MediCare AI provides educational decision-support only and cannot replace immediate emergency care.
 """
 
 
-# Test this module directly
 if __name__ == "__main__":
-    print("=" * 70)
-    print("MediCare AI - Retrieval System Test")
-    print("=" * 70)
-    
-    # Test questions
-    test_questions = [
-        "What are the symptoms of dengue fever?",
-        "How to diagnose hypertension?",
-        "What is the treatment for pneumonia?"
-    ]
-    
-    for question in test_questions:
-        results = search_medical_chunks(question, top_k=3)
-        display_results(question, results)
-        print("\n")
+    print("Testing Acronym Expansion:")
+    sample = "How to manage T2DM with CKD and HTN?"
+    print(f"Original: {sample}")
+    print(f"Expanded: {expand_medical_acronyms(sample)}")
