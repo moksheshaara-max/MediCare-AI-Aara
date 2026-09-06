@@ -10,7 +10,7 @@ import {
   Building, ChevronDown, ChevronUp, BarChart2
 } from 'lucide-react';
 
-const API_BASE = "http://127.0.0.1:5000";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://medicare-ai-aara-backend.onrender.com";
 
 const SUGGESTED_PROMPTS = [
   "What are the diagnostic criteria, risk factors, and treatment protocols for Type 2 Diabetes?",
