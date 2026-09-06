@@ -1,6 +1,6 @@
 """
 MediCare AI - Backend REST API (Flask)
-Exposes RAG Pipeline + PubMed Live Search + Robust Two-Step Report Analyzer.
+Exposes RAG Pipeline + PubMed Live Search + Two-Step Report Analyzer.
 """
 
 import sys
@@ -101,36 +101,6 @@ def parse_json_safely(text):
     return None
 
 
-def call_gemini_with_retry(model_name, contents, config, max_retries=3):
-    """Robust Gemini API caller with automatic retry and backoff."""
-    models_to_try = [model_name, "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-lite-latest"]
-    seen = set()
-    unique_models = []
-    for m in models_to_try:
-        if m not in seen:
-            seen.add(m)
-            unique_models.append(m)
-
-    for model in unique_models:
-        for attempt in range(max_retries):
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config
-                )
-                return response
-            except Exception as e:
-                err_str = str(e)
-                print(f"    Gemini {model} attempt {attempt+1} warning: {err_str[:100]}")
-                if "429" in err_str:
-                    time.sleep(5)
-                else:
-                    time.sleep(2)
-                continue
-    return None
-
-
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"project": "MediCare AI SaaS API", "status": "Online"})
@@ -217,37 +187,41 @@ def analyze_report():
 
         print(f"\n[Report Analyzer] Analyzing: {file.filename} ({len(pdf_text)} characters)")
 
-        # STEP 1: EXHAUSTIVE DATA EXTRACTION
+        # STEP 1: DATA EXTRACTION
         print("  Step 1: Extracting all lab values...")
-        extract_sys_prompt = """You are a highly precise medical data entry specialist.
-Extract EVERY lab parameter from the report. Categorize by system (Hematology, Renal, Metabolic, Liver, Cardiac, Electrolytes, Urine, Thyroid, Lipid, Coagulation).
-RETURN ONLY A JSON ARRAY OF OBJECTS LIKE THIS:
+        extract_sys_prompt = """You are a precise medical laboratory data entry AI.
+Extract EVERY lab parameter. Categorize system (Hematology, Renal, Metabolic, Liver, Cardiac, Electrolytes, Urine, Thyroid, Lipid, Coagulation).
+RETURN ONLY A JSON ARRAY:
 [
   {"system": "Hematology", "test": "Hemoglobin", "result": "8.2", "unit": "g/dL", "ref": "12.0 - 15.0", "status": "LOW"}
 ]
-Do NOT skip any rows. Extract all 100+ values if present."""
-
+"""
         extracted_labs = []
-        extract_response = call_gemini_with_retry(
-            "gemini-2.0-flash",
-            f"EXTRACT ALL LAB PARAMETERS FROM THIS REPORT:\n\n{pdf_text[:12000]}",
-            types.GenerateContentConfig(
-                system_instruction=extract_sys_prompt,
-                temperature=0.0,
-                max_output_tokens=8192,
-                response_mime_type="application/json",
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-            )
-        )
-
-        if extract_response and extract_response.text:
-            parsed = parse_json_safely(extract_response.text)
-            if isinstance(parsed, list):
-                extracted_labs = parsed
+        for attempt in range(3):
+            try:
+                extract_response = client.models.generate_content(
+                    model=GENERATION_MODEL,
+                    contents=f"EXTRACT ALL LAB PARAMETERS:\n\n{pdf_text[:12000]}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=extract_sys_prompt,
+                        temperature=0.0,
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                    )
+                )
+                if extract_response and extract_response.text:
+                    parsed = parse_json_safely(extract_response.text)
+                    if isinstance(parsed, list):
+                        extracted_labs = parsed
+                        break
+            except Exception as e:
+                print(f"  Extraction attempt {attempt+1} warning: {e}")
+                time.sleep(2)
 
         print(f"  Step 1 Complete: Extracted {len(extracted_labs)} lab parameters.")
 
-        # STEP 2: CLINICAL REASONING WITH PREVALENCE ORDERING
+        # STEP 2: CLINICAL REASONING
         print("  Step 2: Clinical reasoning with RAG...")
         abnormal_labs = [l for l in extracted_labs if isinstance(l, dict) and l.get("status") in ["HIGH", "LOW"]]
         search_query = ", ".join([f"{l.get('test')} {l.get('status')}" for l in abnormal_labs[:10]])
@@ -261,8 +235,8 @@ Do NOT skip any rows. Extract all 100+ values if present."""
             tb_context_parts.append(f"[Source {i}: {chunk['book']}, Page {chunk['page']}]\n{chunk['text']}")
         tb_context = "\n---\n".join(tb_context_parts)
 
-        reasoning_sys_prompt = """You are MediCare AI, a senior consultant pathologist and internal medicine specialist.
-Analyze the patient lab data and return a valid JSON object matching this exact schema:
+        reasoning_sys_prompt = """You are MediCare AI, a senior consultant pathologist.
+Analyze the lab data and return a valid JSON object:
 
 {
   "patient_name": "Name or Not Specified",
@@ -286,10 +260,10 @@ Analyze the patient lab data and return a valid JSON object matching this exact 
   }
 }
 
-CRITICAL RULES:
-1. ORDER DIFFERENTIALS BY EPIDEMIOLOGICAL PREVALENCE: COMMON first, LESS COMMON middle, RARE last.
+RULES:
+1. ORDER DIFFERENTIALS BY PREVALENCE: COMMON first, LESS COMMON middle, RARE last.
 2. risk_level MUST be LOW, MODERATE, or HIGH.
-3. Use plain text. NO LaTeX notation.
+3. Use plain Unicode (>=, <=, %). NO LaTeX.
 """
         user_prompt = f"""REFERENCE TEXTBOOK CONTEXT:
 {tb_context}
@@ -303,24 +277,29 @@ EXTRACTED LAB VALUES:
 Output the Clinical JSON with Differentials sorted by Prevalence."""
 
         parsed = {}
-        reason_response = call_gemini_with_retry(
-            "gemini-2.0-flash",
-            user_prompt,
-            types.GenerateContentConfig(
-                system_instruction=reasoning_sys_prompt,
-                temperature=0.1,
-                max_output_tokens=4096,
-                response_mime_type="application/json",
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-            )
-        )
-
-        if reason_response and reason_response.text:
-            parsed = parse_json_safely(reason_response.text) or {}
+        for attempt in range(3):
+            try:
+                reason_response = client.models.generate_content(
+                    model=GENERATION_MODEL,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=reasoning_sys_prompt,
+                        temperature=0.1,
+                        max_output_tokens=4096,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                    )
+                )
+                if reason_response and reason_response.text:
+                    parsed = parse_json_safely(reason_response.text) or {}
+                    if parsed:
+                        break
+            except Exception as e:
+                print(f"  Reasoning attempt {attempt+1} warning: {e}")
+                time.sleep(2)
 
         print("  Step 2 Complete: Clinical reasoning done.")
 
-        # MERGE AND NORMALIZE OUTPUT
         patient_name = clean_latex_symbols(str(parsed.get("patient_name", "Patient")))
         patient_age_gender = clean_latex_symbols(str(parsed.get("patient_age_gender", "N/A")))
         report_date = clean_latex_symbols(str(parsed.get("report_date", "N/A")))
