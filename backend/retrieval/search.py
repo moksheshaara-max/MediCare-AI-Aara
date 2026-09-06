@@ -5,13 +5,20 @@ Takes a user question and finds the most relevant
 medical chunks from MongoDB using Vector Search.
 """
 
+import sys
 import os
+
+# Ensure backend root directory is in sys.path for direct script execution
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
 # Load environment variables
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(dotenv_path=env_path)
 load_dotenv()
 
 # Configuration
@@ -20,7 +27,6 @@ MONGODB_URI = os.getenv("MONGODB_URI")
 DB_NAME = "medicare_rag"
 COLLECTION_NAME = "medical_chunks"
 VECTOR_INDEX_NAME = "vector_index"
-EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMENSIONS = 768
 
 # Initialize Gemini client
@@ -33,7 +39,7 @@ collection = mongo_client[DB_NAME][COLLECTION_NAME]
 
 def embed_query(question):
     """
-    Convert user question into embedding vector using local model.
+    Convert user question into embedding vector using local embedder.
     """
     try:
         from embeddings.local_embedder import embed_single_text
@@ -41,6 +47,8 @@ def embed_query(question):
     except Exception as e:
         print(f"Error embedding query: {e}")
         return None
+
+
 # Medical topic indicators (any of these = likely medical)
 MEDICAL_KEYWORDS = [
     # Symptoms/conditions
@@ -158,6 +166,7 @@ Examples:
 • "What causes chest pain?"
 """
 
+
 def search_medical_chunks(question, top_k=12):
     """
     Search for top 12 medical chunks using MongoDB Vector Search.
@@ -175,8 +184,8 @@ def search_medical_chunks(question, top_k=12):
                 "index": VECTOR_INDEX_NAME,
                 "path": "embedding",
                 "queryVector": query_embedding,
-                "numCandidates": 200,   # Increased from 100 to evaluate more candidates
-                "limit": top_k           # Fetches top 12
+                "numCandidates": 200,
+                "limit": top_k
             }
         },
         {
@@ -219,6 +228,8 @@ def display_results(question, results):
         print(f"Text preview:")
         print(f"  {chunk['text'][:300]}...")
         print()
+
+
 # Emergency symptoms - trigger urgent warning
 EMERGENCY_KEYWORDS = [
     "chest pain", "chest tightness", "heart attack",
@@ -278,6 +289,7 @@ IMMEDIATE ACTIONS:
 This app is for information only.
 Emergency situations require immediate professional help.
 """
+
 
 # Test this module directly
 if __name__ == "__main__":

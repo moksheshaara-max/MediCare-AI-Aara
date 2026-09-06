@@ -3,7 +3,6 @@ pymongo
 google-genai
 python-dotenv
 rich
-sentence-transformers
 requests
 xmltodict
 flask
@@ -12,3 +11,4 @@ reportlab
 nltk
 rouge-score
 gunicorn
+huggingface_hub

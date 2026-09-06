@@ -1,99 +1,100 @@
 """
-MediCare AI - Local Embedder
-Uses sentence-transformers for FREE unlimited embeddings.
-Same 768 dimensions as Google - MongoDB compatible.
+MediCare AI - Lightweight Cloud Embedder
+Uses official Hugging Face InferenceClient for sentence-transformers/all-mpnet-base-v2.
+Output: Exactly 768 dimensions (100% compatible with MongoDB Vector Search).
+Uses zero PyTorch memory on Render.
 """
 
-from sentence_transformers import SentenceTransformer
+import os
 import time
+from dotenv import load_dotenv
+from huggingface_hub import InferenceClient
 
-# Load model - downloads ~420MB on first run only
-print("Loading local embedding model (first time downloads ~420MB)...")
-_model = SentenceTransformer('all-mpnet-base-v2')
-print(f"Model loaded! Dimensions: {_model.get_sentence_embedding_dimension()}")
+# Ensure .env is loaded
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(dotenv_path=env_path)
+load_dotenv()
 
-# Configuration
-EMBEDDING_DIMENSIONS = 768   # Same as Google!
-BATCH_SIZE = 100             # Process 100 at once
-DELAY_BETWEEN_BATCHES = 0    # No delay for local
+HF_TOKEN = os.getenv("HF_TOKEN", "").strip()
+MODEL_ID = "sentence-transformers/all-mpnet-base-v2"
+EMBEDDING_DIMENSIONS = 768
 
-
-def embed_single_text(text, task_type=None):
-    """Generate embedding for a single text."""
-    embedding = _model.encode(text, convert_to_numpy=True, show_progress_bar=False)
-    return embedding.tolist()
+# Initialize official Hugging Face client
+client = InferenceClient(token=HF_TOKEN if HF_TOKEN else None)
 
 
-def embed_batch(texts, task_type=None):
-    """Generate embeddings for multiple texts at once."""
+def embed_single_text(text: str, max_retries: int = 5):
+    """
+    Generate 768-D embedding vector for a single text.
+    """
+    if not text:
+        return [0.0] * EMBEDDING_DIMENSIONS
+
+    for attempt in range(max_retries):
+        try:
+            # Official feature extraction call
+            emb = client.feature_extraction(text, model=MODEL_ID)
+            
+            # Handle numpy arrays or nested lists
+            if hasattr(emb, "tolist"):
+                emb = emb.tolist()
+            
+            if isinstance(emb, list) and len(emb) > 0:
+                # If nested [[0.1, 0.2, ...]], flatten to 1D
+                if isinstance(emb[0], list):
+                    # Mean pooling if multi-token shape
+                    if len(emb) > 1 and len(emb[0]) == EMBEDDING_DIMENSIONS:
+                        pooled = [sum(col) / len(col) for col in zip(*emb)]
+                        return pooled
+                    return emb[0]
+                return emb
+            
+            return emb
+
+        except Exception as e:
+            err_str = str(e)
+            if "503" in err_str or "loading" in err_str.lower():
+                time.sleep(3)
+                continue
+            time.sleep(1.5)
+
+    print("⚠️ Fallback: Unable to generate embedding.")
+    return None
+
+
+def embed_batch(texts: list, max_retries: int = 5):
+    """
+    Generate embeddings for multiple texts.
+    """
     if not texts:
         return []
     
-    embeddings = _model.encode(
-        texts,
-        batch_size=32,
-        show_progress_bar=False,
-        convert_to_numpy=True
-    )
-    return [emb.tolist() for emb in embeddings]
+    embeddings = []
+    for text in texts:
+        vec = embed_single_text(text, max_retries=max_retries)
+        if vec:
+            embeddings.append(vec)
+    return embeddings
 
 
 def embed_all_chunks(chunks):
-    """Generate embeddings for ALL chunks - no limits."""
-    total = len(chunks)
-    print(f"Generating {total} embeddings locally...")
-    print(f"Dimensions: {EMBEDDING_DIMENSIONS}")
-    print(f"NO API LIMITS - running on your laptop")
-    print()
-    
-    start = time.time()
-    all_texts = [c["text"] for c in chunks]
-    
-    all_embeddings = []
-    for i in range(0, total, BATCH_SIZE):
-        batch = all_texts[i:i + BATCH_SIZE]
-        batch_num = (i // BATCH_SIZE) + 1
-        total_batches = (total + BATCH_SIZE - 1) // BATCH_SIZE
-        
-        print(f"Batch {batch_num}/{total_batches} (chunks {i+1}-{min(i+BATCH_SIZE, total)})...")
-        embeddings = embed_batch(batch)
-        all_embeddings.extend(embeddings)
-    
-    for chunk, embedding in zip(chunks, all_embeddings):
-        chunk["embedding"] = embedding
-    
-    elapsed = time.time() - start
-    print()
-    print(f"Complete in {elapsed:.1f} seconds")
-    print(f"Speed: {total/elapsed:.1f} chunks/second")
-    
+    for chunk in chunks:
+        chunk["embedding"] = embed_single_text(chunk.get("text", ""))
     return chunks
 
 
-class QuotaExhaustedError(Exception):
-    """Placeholder - not used in local embedder."""
-    pass
-
-
 if __name__ == "__main__":
-    print("=" * 50)
-    print("Local Embedder Test")
-    print("=" * 50)
-    
-    sample_texts = [
-        "Diabetes is a metabolic disease.",
-        "Common symptoms include high fever.",
-        "Heart attack requires urgent care."
-    ]
-    
-    print(f"\nEmbedding {len(sample_texts)} test texts...")
-    embeddings = embed_batch(sample_texts)
-    
-    print(f"\nResults:")
-    for i, (text, emb) in enumerate(zip(sample_texts, embeddings)):
-        print(f"  Text {i+1}: {text[:40]}...")
-        print(f"    Size: {len(emb)}, First 3: {emb[:3]}")
-    
-    print("\n" + "=" * 50)
-    print("Local embedder working!")
-    print("=" * 50)
+    print("=" * 60)
+    print("Testing Official Hugging Face Embedder")
+    print(f"Target Model: {MODEL_ID}")
+    print(f"Token Configured: {'YES' if HF_TOKEN else 'NO'}")
+    print("=" * 60)
+
+    test_sentence = "What are the symptoms of Type 2 Diabetes?"
+    vector = embed_single_text(test_sentence)
+
+    if vector and isinstance(vector, list) and len(vector) == 768:
+        print(f"\n✓ SUCCESS: Generated {len(vector)}-dimensional vector!")
+        print(f"First 5 dimensions: {vector[:5]}")
+    else:
+        print("\n❌ Error generating embedding.")
