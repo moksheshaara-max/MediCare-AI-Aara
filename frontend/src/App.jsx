@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import mermaid from 'mermaid';
-import { 
-  Stethoscope, Send, AlertTriangle, BookOpen, Microscope, ShieldAlert, 
-  RefreshCw, ExternalLink, Sparkles, Info, Activity, HeartPulse, 
-  Award, FileText, UploadCloud, CheckCircle2, FileCheck, MessageSquare, 
-  FlaskConical, TrendingUp, TrendingDown, Minus, ClipboardList, 
-  Stethoscope as ScopeIcon, HelpCircle, X, Trash2, Download, Filter, 
-  Compass, AlertOctagon, UserPlus, Leaf, TestTube, User, Calendar, 
-  Building, ChevronDown, ChevronUp, BarChart2, Layers, GitBranch
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  Stethoscope, Send, AlertTriangle, BookOpen, Microscope, ShieldAlert,
+  RefreshCw, ExternalLink, Sparkles, Info, Activity, HeartPulse,
+  Award, FileText, UploadCloud, CheckCircle2, FileCheck,
+  TrendingUp, TrendingDown, Minus, ClipboardList,
+  X, Trash2, Download, Filter, UserPlus, Leaf, TestTube, 
+  TestTubes, User, Calendar, Building, ChevronDown, ChevronUp, 
+  BarChart2, Layers, GitBranch, Moon, Sun, Copy, Check, RotateCcw, 
+  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://medicare-ai-aara-backend.onrender.com";
@@ -17,81 +19,77 @@ mermaid.initialize({
   startOnLoad: false,
   theme: 'neutral',
   securityLevel: 'loose',
-  fontFamily: 'ui-sans-serif, system-ui, sans-serif'
+  fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+  flowchart: { curve: 'basis', padding: 12, useMaxWidth: true },
 });
 
+let __mermaidIdCounter = 0;
+function nextMermaidId() {
+  __mermaidIdCounter += 1;
+  return `mermaid-diagram-${__mermaidIdCounter}`;
+}
+
+const SUGGESTED_PROMPTS = [
+  { icon: '🩺', text: "What is the step-by-step diagnostic and management algorithm for Type 2 Diabetes?" },
+  { icon: '🔬', text: "Evaluate recent clinical trial evidence for Tirzepatide versus Semaglutide in NASH." },
+  { icon: '💊', text: "What is the first-line and second-line pharmacotherapy for Pneumonia?" },
+  { icon: '🚨', text: "I have severe crushing chest pain radiating to the jaw with shortness of breath." },
+];
+
+/* ── PREMIUM COMPONENTS ── */
 function MermaidDiagram({ chart }) {
   const [svgContent, setSvgContent] = useState('');
   const [renderError, setRenderError] = useState(false);
-  const containerRef = useRef(null);
-  const uniqueId = useRef(`mermaid-${Math.random().toString(36).substring(2, 11)}`);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const idRef = useRef(null);
+  if (idRef.current === null) idRef.current = nextMermaidId();
 
   useEffect(() => {
     if (!chart) return;
     let isMounted = true;
-
     try {
-      mermaid.render(uniqueId.current, chart.trim())
+      mermaid.render(idRef.current, chart.trim())
         .then(({ svg }) => {
           if (isMounted) {
-            setSvgContent(svg);
+            const responsiveSvg = svg.replace(/<svg /, '<svg style="max-width:100%;height:auto;display:block;margin:auto;" ');
+            setSvgContent(responsiveSvg);
             setRenderError(false);
           }
         })
-        .catch(() => {
-          if (isMounted) setRenderError(true);
-        });
-    } catch {
-      if (isMounted) setRenderError(true);
-    }
-
+        .catch(() => { if (isMounted) setRenderError(true); });
+    } catch { if (isMounted) setRenderError(true); }
     return () => { isMounted = false; };
   }, [chart]);
 
   if (renderError || !svgContent) {
-    return (
-      <pre className="my-2 p-3 bg-slate-900 text-slate-100 rounded-xl text-xs overflow-x-auto font-mono">
-        {chart}
-      </pre>
-    );
+    return <pre className="my-3 p-4 bg-slate-900 text-slate-100 rounded-xl text-[10px] md:text-xs overflow-x-auto font-mono">{chart}</pre>;
   }
 
   return (
-    <div className="my-3 p-3 md:p-4 bg-gradient-to-b from-sky-50/40 to-slate-50 border border-sky-100 rounded-2xl shadow-2xs overflow-x-auto flex flex-col items-center">
-      <div className="w-full flex items-center justify-between text-[10px] font-bold text-sky-800 uppercase tracking-wider mb-2 border-b border-sky-100 pb-1.5">
-        <span className="flex items-center gap-1"><GitBranch className="w-3.5 h-3.5 text-sky-600" /> Clinical Decision Pathway Algorithm</span>
-        <span className="text-slate-400 font-normal">Interactive Flowchart</span>
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="my-4 p-3 md:p-5 bg-gradient-to-br from-sky-50/60 via-white to-indigo-50/40 dark:from-slate-800/60 dark:via-[#131a2c] dark:to-slate-800/40 border border-sky-200/70 dark:border-slate-700 rounded-2xl shadow-soft overflow-hidden">
+      <div className="w-full flex items-center justify-between text-[10px] font-bold text-sky-700 dark:text-sky-400 uppercase tracking-wider mb-3 border-b border-sky-100 dark:border-slate-700 pb-2">
+        <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Clinical Decision Algorithm</span>
+        <button onClick={() => setIsExpanded(!isExpanded)} className="text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1">
+          {isExpanded ? 'Collapse' : 'Expand'} <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+        </button>
       </div>
-      <div 
-        ref={containerRef}
-        className="w-full overflow-x-auto flex justify-center py-1"
-        dangerouslySetInnerHTML={{ __html: svgContent }} 
-      />
-    </div>
+      <div className={`w-full overflow-x-auto flex justify-center py-2 transition-all ${isExpanded ? '' : 'max-h-[350px] overflow-y-auto'}`} dangerouslySetInnerHTML={{ __html: svgContent }} />
+    </motion.div>
   );
 }
-
-const SUGGESTED_PROMPTS = [
-  "What is the step-by-step diagnostic and management algorithm for Type 2 Diabetes?",
-  "Evaluate recent clinical trial evidence for Tirzepatide versus Semaglutide in NASH and CKD.",
-  "What is the first-line and second-line pharmacotherapy for Community-Acquired Pneumonia?",
-  "I have severe crushing chest pain radiating to the jaw with shortness of breath."
-];
 
 function StatusBadge({ status }) {
   const s = (status || "UNKNOWN").toUpperCase();
   const config = {
-    HIGH: { bg: "bg-rose-500/10 text-rose-700 border-rose-300/80", icon: TrendingUp },
-    LOW: { bg: "bg-amber-500/10 text-amber-800 border-amber-300/80", icon: TrendingDown },
-    NORMAL: { bg: "bg-emerald-500/10 text-emerald-700 border-emerald-300/80", icon: Minus }
+    HIGH: { bg: "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-300/60 dark:border-rose-700/60", icon: TrendingUp },
+    LOW: { bg: "bg-amber-500/10 text-amber-800 dark:text-amber-400 border-amber-300/60 dark:border-amber-700/60", icon: TrendingDown },
+    NORMAL: { bg: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-300/60 dark:border-emerald-700/60", icon: Minus }
   };
-  const c = config[s] || { bg: "bg-slate-100 text-slate-600 border-slate-200", icon: Minus };
+  const c = config[s] || { bg: "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700", icon: Minus };
   const Icon = c.icon;
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border class-config">
-      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${c.bg}`}>
-        <Icon className="w-3 h-3" /> {s}
-      </span>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${c.bg}`}>
+      <Icon className="w-2.5 h-2.5" /> {s}
     </span>
   );
 }
@@ -99,9 +97,9 @@ function StatusBadge({ status }) {
 function PrevalenceBadge({ prevalence }) {
   const p = (prevalence || "COMMON").toUpperCase();
   const config = {
-    "COMMON": { bg: "bg-emerald-100 text-emerald-800 border-emerald-300", label: "COMMON (MOST LIKELY)" },
-    "LESS COMMON": { bg: "bg-amber-100 text-amber-900 border-amber-300", label: "LESS COMMON" },
-    "RARE": { bg: "bg-purple-100 text-purple-900 border-purple-300", label: "RARE / ATYPICAL" }
+    "COMMON": { bg: "bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700/60", label: "COMMON" },
+    "LESS COMMON": { bg: "bg-amber-100 dark:bg-amber-500/20 text-amber-900 dark:text-amber-300 border-amber-300 dark:border-amber-700/60", label: "LESS COMMON" },
+    "RARE": { bg: "bg-purple-100 dark:bg-purple-500/20 text-purple-900 dark:text-purple-300 border-purple-300 dark:border-purple-500/30", label: "RARE / ATYPICAL" }
   };
   const c = config[p] || config["COMMON"];
   return (
@@ -114,16 +112,28 @@ function PrevalenceBadge({ prevalence }) {
 function RiskBanner({ risk }) {
   const r = (risk || "MODERATE").toUpperCase();
   const styles = {
-    HIGH: "bg-gradient-to-r from-rose-50 to-red-100 border-rose-300 text-rose-900",
-    MODERATE: "bg-gradient-to-r from-amber-50 to-orange-100 border-amber-300 text-amber-950",
-    LOW: "bg-gradient-to-r from-emerald-50 to-teal-100 border-emerald-300 text-emerald-950"
+    HIGH: "bg-gradient-to-r from-rose-50 to-red-100 dark:from-rose-950/40 dark:to-red-900/40 border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200",
+    MODERATE: "bg-gradient-to-r from-amber-50 to-orange-100 dark:from-amber-950/40 dark:to-orange-900/40 border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-200",
+    LOW: "bg-gradient-to-r from-emerald-50 to-teal-100 dark:from-emerald-950/40 dark:to-teal-900/40 border-emerald-300 dark:border-emerald-800 text-emerald-950 dark:text-emerald-200",
   };
   return (
-    <div className={`rounded-xl border px-3.5 py-2 shadow-xs ${styles[r] || styles.MODERATE}`}>
+    <div className={`rounded-xl border px-3.5 py-2 shadow-soft ${styles[r] || styles.MODERATE}`}>
       <div className="flex items-center gap-1.5 font-bold text-xs md:text-sm">
         <ShieldAlert className="w-4 h-4 shrink-0 text-current" /> Risk Triage: {r}
       </div>
     </div>
+  );
+}
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {}
+  };
+  return (
+    <button onClick={handleCopy} className="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 transition-colors">
+      {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+    </button>
   );
 }
 
@@ -149,19 +159,25 @@ const exportClinicalPDF = async (reportData) => {
   }
 };
 
+/* ── MAIN APP ── */
 export default function App() {
   const [activeTab, setActiveTab] = useState('chat');
-  
+  const [darkMode, setDarkMode] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem('medicare_theme');
+      if (saved) return saved === 'dark';
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+    return false;
+  });
+
   const [messages, setMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem('medicare_chat_history');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
+    try { const saved = localStorage.getItem('medicare_chat_history'); return saved ? JSON.parse(saved) : []; } catch { return []; }
   });
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showTransparencyModal, setShowTransparencyModal] = useState(false);
+  const [showTransparency, setShowTransparency] = useState(false);
   const [openEvalId, setOpenEvalId] = useState(null);
 
   const [reportFile, setReportFile] = useState(null);
@@ -173,73 +189,81 @@ export default function App() {
 
   const [serverHealth, setServerHealth] = useState({ online: false, chunks: 0, docs: 0 });
   const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { localStorage.setItem('medicare_chat_history', JSON.stringify(messages)); }, [messages]);
 
   useEffect(() => {
-    try { localStorage.setItem('medicare_chat_history', JSON.stringify(messages)); } catch {}
-  }, [messages]);
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add('dark');
+      root.style.colorScheme = 'dark';
+    } else {
+      root.classList.remove('dark');
+      root.style.colorScheme = 'light';
+    }
+    localStorage.setItem('medicare_theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
-  const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
-  useEffect(() => { if (activeTab === 'chat') scrollToBottom(); }, [messages, loading, activeTab]);
+  const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, []);
+  useEffect(() => { if (activeTab === 'chat') scrollToBottom(); }, [messages, loading, activeTab, scrollToBottom]);
 
-  useEffect(() => { checkHealth(); }, []);
-
-  const checkHealth = async () => {
+  const checkHealth = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE}/api/health`);
       if (res.ok) {
         const data = await res.json();
-        setServerHealth({ online: true, chunks: data.total_chunks_indexed || 24520, docs: data.total_documents || 125 });
+        setServerHealth({ online: true, chunks: data.total_chunks_indexed || 0, docs: data.total_documents || 0 });
       } else { setServerHealth({ online: false, chunks: 0, docs: 0 }); }
     } catch { setServerHealth({ online: false, chunks: 0, docs: 0 }); }
-  };
+  }, []);
 
-  const clearChatHistory = () => { setMessages([]); localStorage.removeItem('medicare_chat_history'); };
+  useEffect(() => { checkHealth(); const id = setInterval(checkHealth, 60000); return () => clearInterval(id); }, [checkHealth]);
+
+  const clearChatHistory = () => {
+    if (window.confirm("Clear all chat history?")) {
+      setMessages([]);
+      localStorage.removeItem('medicare_chat_history');
+    }
+  };
 
   const handleSend = async (textToSend) => {
     const questionText = textToSend || input;
     if (!questionText.trim() || loading) return;
 
-    const userMessage = {
-      id: Date.now(), sender: 'user', text: questionText,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    if (!textToSend) setInput('');
+    const userMsg = { id: Date.now(), sender: 'user', text: questionText, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
     setLoading(true);
 
     try {
-      const allMsgs = [...messages, userMessage];
-      const chatHistory = allMsgs.slice(-6).map(m => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: (m.text || '').substring(0, 500)
-      }));
-
+      const chatHistory = messages.slice(-6).map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: (m.text || '').substring(0, 500) }));
       const response = await fetch(`${API_BASE}/api/ask`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: questionText, chat_history: chatHistory })
       });
-
-      if (!response.ok) throw new Error(`Server status ${response.status}`);
+      if (!response.ok) throw new Error(`Server Error`);
       const data = await response.json();
 
       setMessages(prev => [...prev, {
         id: Date.now() + 1, sender: 'ai', text: data.answer, mode: data.mode,
-        accuracyScore: data.accuracy_score || 0, evaluation: data.evaluation || null,
-        isMedical: data.is_medical, isEmergency: data.is_emergency,
+        evaluation: data.evaluation, isEmergency: data.is_emergency,
         emergencyMessage: data.emergency_message, pubmedSources: data.pubmed_sources || [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
     } catch {
       setMessages(prev => [...prev, {
-        id: Date.now() + 1, sender: 'ai',
-        text: `⚠️ **Connection Notice:** Could not connect to MediCare AI Backend. Please verify server status.`,
-        mode: 'error', accuracyScore: 0, evaluation: null, isMedical: true, isEmergency: false,
-        pubmedSources: [],
+        id: Date.now() + 1, sender: 'ai', text: `⚠️ **Server Error:** Could not reach the backend.`, mode: 'error',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
     } finally { setLoading(false); }
+  };
+
+  const handleRegenerate = (msgId) => {
+    const msg = messages.find(m => m.id === msgId);
+    if (!msg || !msg.question) return;
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+    setTimeout(() => handleSend(msg.question), 100);
   };
 
   const handleReportUpload = async (e) => {
@@ -251,566 +275,468 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/api/analyze-report`, { method: 'POST', body: formData });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to analyze report.');
+      if (!response.ok) throw new Error(data.error);
       setReportResult(data);
-    } catch (err) { setReportError(err.message || 'An error occurred.'); }
+    } catch (err) { setReportError("Analysis failed. Please check the PDF."); }
     finally { setReportLoading(false); }
   };
 
-  const onDrop = (e) => { e.preventDefault(); setDragActive(false); const file = e.dataTransfer.files?.[0]; if (file) setReportFile(file); };
-  const toggleEval = (id) => { setOpenEvalId(prev => (prev === id ? null : id)); };
+  const groupedLabs = useMemo(() => {
+    if (!reportResult?.lab_values) return {};
+    const filtered = reportResult.lab_values.filter(l => {
+      if (labFilter === 'HIGH') return l.status === 'HIGH';
+      if (labFilter === 'LOW') return l.status === 'LOW';
+      if (labFilter === 'NORMAL') return l.status === 'NORMAL';
+      if (labFilter === 'ABNORMAL') return l.status === 'HIGH' || l.status === 'LOW';
+      return true;
+    });
+    
+    return filtered.reduce((acc, lab) => {
+      const sys = lab.system || 'General';
+      if (!acc[sys]) acc[sys] = [];
+      acc[sys].push(lab);
+      return acc;
+    }, {});
+  }, [reportResult, labFilter]);
 
-  const getFilteredLabs = () => {
-    if (!reportResult?.lab_values) return [];
-    const labs = reportResult.lab_values;
-    if (labFilter === 'HIGH') return labs.filter(l => l.status === 'HIGH');
-    if (labFilter === 'LOW') return labs.filter(l => l.status === 'LOW');
-    if (labFilter === 'NORMAL') return labs.filter(l => l.status === 'NORMAL');
-    if (labFilter === 'ABNORMAL') return labs.filter(l => l.status === 'HIGH' || l.status === 'LOW');
-    return labs;
-  };
-
-  const getGroupedLabs = () => {
-    const filtered = getFilteredLabs();
-    const groups = {};
-    filtered.forEach(lab => { const sys = lab.system || 'General / Other'; if (!groups[sys]) groups[sys] = []; groups[sys].push(lab); });
-    return groups;
-  };
-
-  const labCounts = {
+  const labCounts = useMemo(() => ({
     total: reportResult?.lab_values?.length || 0,
     high: reportResult?.lab_values?.filter(l => l.status === 'HIGH').length || 0,
     low: reportResult?.lab_values?.filter(l => l.status === 'LOW').length || 0,
     normal: reportResult?.lab_values?.filter(l => l.status === 'NORMAL').length || 0,
-  };
+  }), [reportResult]);
+
+  useEffect(() => {
+    const handler = (e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); inputRef.current?.focus(); } };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50 text-slate-800 font-sans antialiased">
+    <div className="flex flex-col min-h-screen relative overflow-x-hidden transition-colors">
       
-      {/* ═══════════ HEADER ═══════════ */}
-      <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 md:px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 shadow-xs sticky top-0 z-30">
-        <div className="flex items-center gap-2.5">
-          <div className="bg-gradient-to-tr from-sky-600 via-teal-600 to-indigo-600 text-white p-2 rounded-xl shadow-sm shadow-sky-500/20 animate-in zoom-in duration-300">
-            <Stethoscope className="w-5 h-5 md:w-6 md:h-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-base md:text-lg font-extrabold bg-gradient-to-r from-sky-700 via-indigo-700 to-teal-700 bg-clip-text text-transparent">MediCare AI</h1>
-              <span className="text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-full bg-gradient-to-r from-sky-50 to-indigo-50 text-sky-800 border border-sky-200">Clinical Suite</span>
+      {/* Decorative Background Orbs */}
+      <div aria-hidden className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+        <div className="absolute -top-32 -right-32 w-96 h-96 bg-gradient-to-br from-sky-200/40 to-indigo-200/30 dark:from-sky-900/30 dark:to-indigo-900/20 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 -left-32 w-96 h-96 bg-gradient-to-br from-teal-200/30 to-emerald-200/20 dark:from-teal-900/30 dark:to-emerald-900/20 rounded-full blur-3xl" />
+      </div>
+
+      {/* ── UNIFIED RESPONSIVE HEADER ── */}
+      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 shadow-sm w-full">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-6">
+          
+          <div className="flex items-center justify-between w-full md:w-auto">
+            <div className="flex items-center gap-3">
+              <motion.div whileHover={{ scale: 1.05 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2 rounded-xl shadow-glow-sky shrink-0">
+                <Stethoscope className="w-5 h-5 md:w-6 md:h-6" />
+              </motion.div>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <h1 className="text-lg md:text-xl font-extrabold gradient-text truncate">MediCare AI</h1>
+                  <span className="text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hidden xs:inline-block">Clinical Suite</span>
+                </div>
+                <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 truncate">Textbook RAG · PubMed · Lab Pathophysiology</p>
+              </div>
             </div>
-            <p className="text-[9px] md:text-[11px] text-slate-500 hidden sm:block">Textbook RAG Grounding + PubMed Research + Lab Pathophysiology</p>
+            
+            {/* Mobile Actions */}
+            <div className="flex md:hidden items-center gap-1.5">
+              <button onClick={() => setShowTransparency(true)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <Info className="w-4 h-4" />
+              </button>
+              <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/70 order-3 sm:order-2 w-full sm:w-auto justify-center">
-          <button onClick={() => setActiveTab('chat')} 
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'chat' ? 'bg-white text-sky-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}>
-            <MessageSquare className="w-3.5 h-3.5 text-sky-600" /> Clinical Assistant
-          </button>
-          <button onClick={() => setActiveTab('report')} 
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${activeTab === 'report' ? 'bg-white text-teal-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}>
-            <FlaskConical className="w-3.5 h-3.5 text-teal-600" /> Lab Report Analyzer
-          </button>
-        </div>
+          {/* Navigation Tabs (Mobile adapts to full width) */}
+          <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1.5 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
+            <button onClick={() => setActiveTab('chat')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'chat' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
+              <MessageCircle className="w-4 h-4" /> Clinical Assistant
+            </button>
+            <button onClick={() => setActiveTab('report')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'report' ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
+              <FileSearch className="w-4 h-4" /> Lab Analyzer
+            </button>
+          </div>
 
-        {/* Status Indicators */}
-        <div className="flex items-center gap-1.5 order-2 sm:order-3">
-          <button onClick={() => setShowTransparencyModal(true)} 
-            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors">
-            <Info className="w-3 h-3 text-sky-600" /> <span className="hidden xs:inline">Transparency</span>
-          </button>
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border ${serverHealth.online ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${serverHealth.online ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
-            <span>{serverHealth.online ? `Online (${serverHealth.chunks.toLocaleString()})` : 'Connecting...'}</span>
-            <button onClick={checkHealth} className="hover:rotate-180 transition-transform duration-300"><RefreshCw className="w-2.5 h-2.5" /></button>
+          {/* Desktop Actions */}
+          <div className="hidden md:flex items-center gap-2.5">
+            <button onClick={() => setShowTransparency(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
+              <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" /> Transparency
+            </button>
+            <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition hover:bg-slate-200 dark:hover:bg-slate-700">
+              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${serverHealth.online ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800'}`}>
+              <span className={`w-2 h-2 rounded-full ${serverHealth.online ? 'bg-emerald-500 pulse-ring' : 'bg-amber-500'}`} />
+              <span>{serverHealth.online ? 'Online' : 'Offline'}</span>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* ═══════════ TRANSPARENCY MODAL ═══════════ */}
-      {showTransparencyModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 md:p-4">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-5 md:p-6 space-y-4 shadow-2xl border border-slate-200 animate-in fade-in duration-200">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2 text-sky-900 font-bold text-base md:text-lg">
-                <Info className="w-5 h-5 text-sky-600" /> Clinical System Transparency
+      {/* ── TRANSPARENCY MODAL ── */}
+      <AnimatePresence>
+        {showTransparency && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowTransparency(false)}>
+            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-white dark:bg-[#131a2c] rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
+              <h3 className="font-extrabold text-xl mb-5 text-slate-900 dark:text-white flex items-center gap-2">
+                <div className="bg-sky-100 dark:bg-sky-900/40 p-2 rounded-xl text-sky-600 dark:text-sky-400"><Info className="w-5 h-5"/></div>
+                System Transparency
+              </h3>
+              <div className="text-sm text-slate-600 dark:text-slate-400 space-y-4">
+                <div className="p-4 bg-sky-50 dark:bg-sky-900/20 rounded-xl text-sky-900 dark:text-sky-300 font-medium border border-sky-100 dark:border-sky-800/50">
+                  {serverHealth.chunks.toLocaleString()} verified textbook chunks indexed + Live PubMed.
+                </div>
+                <div className="space-y-3">
+                  <p className="flex gap-2"><span className="text-lg">🎯</span><span><strong>Vector Score:</strong> 768-D cosine similarity.</span></p>
+                  <p className="flex gap-2"><span className="text-lg">📊</span><span><strong>Prevalence:</strong> Differentials sorted from common to rare.</span></p>
+                  <p className="flex gap-2"><span className="text-lg">🔬</span><span><strong>NLP Quality:</strong> BLEU & ROUGE verified outputs.</span></p>
+                  <p className="flex gap-2"><span className="text-lg">🛡️</span><span><strong>Safety:</strong> Educational decision-support only.</span></p>
+                </div>
               </div>
-              <button onClick={() => setShowTransparencyModal(false)} className="p-1 text-slate-400 hover:text-slate-700"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="space-y-2.5 text-xs text-slate-600 leading-relaxed max-h-[70vh] overflow-y-auto pr-1">
-              <div className="p-3 bg-gradient-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-2xl text-sky-950 font-medium">
-                <strong>Knowledge Base:</strong> Over 24,520 verified medical textbook chunks (Harrison's, Davidson's, Hutchison's, KD Tripathi, WHO, ICMR guidelines) combined with real-time NIH PubMed API querying.
-              </div>
-              <p>• <strong>Vector Similarity Score:</strong> Mathematical cosine similarity across 768 dimensions between clinical query and indexed textbook chunks.</p>
-              <p>• <strong>Prevalence Ranking:</strong> Differential considerations are sorted from most common clinical conditions to rare presentations.</p>
-              <p>• <strong>NLP Composite Quality:</strong> Automated groundedness, semantic similarity, BLEU-4, and ROUGE-L verification against source texts.</p>
-              <p>• <strong>Safety Disclaimers:</strong> Designed for clinical educational decision-support. Not a substitute for licensed clinical judgment.</p>
-            </div>
-            <div className="text-right pt-2 border-t border-slate-100">
-              <button onClick={() => setShowTransparencyModal(false)} className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs">
-                Understood
+              <button onClick={() => setShowTransparency(false)} className="w-full mt-8 py-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold transition-colors">
+                Acknowledge
               </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* ═══════════ CHAT TAB ═══════════ */}
+      {/* ── CHAT TAB ── */}
       {activeTab === 'chat' && (
-        <div className="flex-1 flex flex-col justify-between max-w-5xl mx-auto w-full p-3 md:p-6">
-          <main className="space-y-4 md:space-y-6 pb-4">
+        <main className="flex-1 max-w-4xl mx-auto w-full p-4 flex flex-col justify-between">
+          <div className="space-y-5 pb-4">
             
             {messages.length > 0 && (
-              <div className="flex justify-end animate-in fade-in duration-300">
-                <button onClick={clearChatHistory} className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-rose-600 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs transition-colors">
+              <div className="flex justify-end">
+                <button onClick={clearChatHistory} className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-rose-600 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                   <Trash2 className="w-3.5 h-3.5" /> Clear History
                 </button>
               </div>
             )}
 
-            {/* Welcome Screen */}
             {messages.length === 0 && (
-              <div className="bg-gradient-to-b from-white to-slate-50 rounded-3xl p-5 md:p-8 border border-slate-200/90 shadow-sm text-center my-2 md:my-4 space-y-5 animate-in slide-in-from-bottom duration-500">
-                <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-tr from-sky-500 via-indigo-500 to-teal-500 text-white rounded-2xl flex items-center justify-center mx-auto shadow-md shadow-sky-500/20">
-                  <HeartPulse className="w-8 h-8 md:w-9 md:h-9" />
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-10 border border-slate-200 dark:border-slate-800 shadow-soft text-center my-4 md:my-8">
+                <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-tr from-sky-500 via-indigo-500 to-teal-500 text-white rounded-3xl flex items-center justify-center mx-auto shadow-glow-sky mb-6">
+                  <HeartPulse className="w-8 h-8 md:w-10 md:h-10" />
                 </div>
-                <div className="max-w-xl mx-auto space-y-1.5">
-                  <h2 className="text-xl md:text-2xl font-extrabold text-slate-900">Clinical Assistant & Medical RAG</h2>
-                  <p className="text-xs md:text-sm text-slate-600 leading-relaxed">
-                    Grounded in <span className="font-bold text-sky-700">24,520+ medical textbook chunks</span> and <span className="font-bold text-indigo-700">Live NIH PubMed Clinical Trials</span>.
-                  </p>
+                <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white mb-3 tracking-tight">Clinical Assistant</h2>
+                <p className="text-sm md:text-base text-slate-600 dark:text-slate-400 max-w-lg mx-auto mb-8">
+                  Grounded in <span className="font-bold text-sky-700 dark:text-sky-400">24,520+ medical textbook chunks</span> and <span className="font-bold text-indigo-700 dark:text-indigo-400">Live PubMed Trials</span>.
+                </p>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                  {SUGGESTED_PROMPTS.map((p, idx) => (
+                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} key={idx} onClick={() => handleSend(p.text)} 
+                      className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-start justify-between gap-3 hover:border-sky-400 dark:hover:border-sky-500 transition-colors group shadow-sm">
+                      <span className="flex items-start gap-3">
+                        <span className="text-xl shrink-0">{p.icon}</span>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 leading-snug">{p.text}</span>
+                      </span>
+                      <Send className="w-4 h-4 text-slate-400 group-hover:text-sky-500 shrink-0 mt-0.5 transition-colors" />
+                    </motion.button>
+                  ))}
                 </div>
-
-                {/* Feature Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 md:gap-3 text-left pt-2">
-                  <div className="p-3.5 rounded-2xl bg-white border border-sky-100 shadow-2xs space-y-1 hover:border-sky-300 transition-colors">
-                    <div className="flex items-center gap-1.5 text-sky-800 font-bold text-xs"><BookOpen className="w-4 h-4 text-sky-600" /> Textbook Grounding</div>
-                    <p className="text-[11px] text-slate-500 leading-normal">Harrison's, Davidson's, Hutchison's, and MoHFW protocols with citations.</p>
-                  </div>
-                  <div className="p-3.5 rounded-2xl bg-white border border-indigo-100 shadow-2xs space-y-1 hover:border-indigo-300 transition-colors">
-                    <div className="flex items-center gap-1.5 text-indigo-800 font-bold text-xs"><Microscope className="w-4 h-4 text-indigo-600" /> Live PubMed Trials</div>
-                    <p className="text-[11px] text-slate-500 leading-normal">Fetches 2024–2025 peer-reviewed trial abstracts with verified PMIDs.</p>
-                  </div>
-                  <div className="p-3.5 rounded-2xl bg-white border border-rose-100 shadow-2xs space-y-1 hover:border-rose-300 transition-colors">
-                    <div className="flex items-center gap-1.5 text-rose-800 font-bold text-xs"><ShieldAlert className="w-4 h-4 text-rose-600" /> Clinical Safety Guardrails</div>
-                    <p className="text-[11px] text-slate-500 leading-normal">Immediate detection of critical emergencies with emergency dispatch alerts.</p>
-                  </div>
-                </div>
-
-                {/* Suggested Prompts */}
-                <div className="pt-2 text-left animate-in fade-in duration-500 delay-300">
-                  <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" /> Suggested Clinical Inquiries:
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {SUGGESTED_PROMPTS.map((prompt, idx) => (
-                      <button key={idx} onClick={() => handleSend(prompt)} 
-                        className="p-3 text-xs text-slate-700 bg-white hover:bg-sky-50/70 hover:border-sky-300 border border-slate-200/90 rounded-2xl transition-all text-left shadow-2xs flex items-start justify-between group">
-                        <span className="font-medium leading-snug">{prompt}</span>
-                        <Send className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 transition-colors shrink-0 ml-2 mt-0.5" />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              </motion.div>
             )}
 
-            {/* Chat Messages */}
-            {messages.map((msg) => (
-              <div key={msg.id} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'} space-y-2`}>
-                {msg.sender === 'user' ? (
-                  <div className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-3xl rounded-tr-xs px-4 md:px-5 py-3 max-w-xl md:max-w-2xl shadow-sm text-xs md:text-sm leading-relaxed animate-in slide-in-from-right-5 duration-350">
-                    {msg.text}
-                    <div className="text-[9px] text-sky-100/80 mt-1 text-right">{msg.timestamp}</div>
-                  </div>
-                ) : (
-                  <div className="bg-white rounded-3xl border border-slate-200 p-4 md:p-6 max-w-4xl w-full shadow-xs space-y-4 animate-in slide-in-from-left-5 duration-350">
-                    
-                    {/* Emergency Alert Banner */}
-                    {msg.isEmergency && (
-                      <div className="bg-rose-50 border-2 border-rose-500 rounded-2xl p-4 text-rose-900 space-y-2 animate-pulse">
-                        <div className="flex items-center gap-2 font-bold text-sm md:text-base text-rose-700">
-                          <AlertTriangle className="w-5 h-5 text-rose-600" /> CRITICAL MEDICAL EMERGENCY DETECTED
-                        </div>
-                        <p className="text-xs text-rose-800 leading-relaxed whitespace-pre-line font-medium">{msg.emergencyMessage}</p>
-                      </div>
-                    )}
-
-                    {/* AI Response Header */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 bg-gradient-to-tr from-sky-600 to-teal-600 text-white rounded-xl flex items-center justify-center font-bold text-xs shadow-2xs">
-                          AI
-                        </div>
-                        <span className="font-bold text-xs md:text-sm text-slate-900">MediCare AI Clinical Synthesis</span>
-                      </div>
-                      
-                      {msg.evaluation && (
-                        <button onClick={() => toggleEval(msg.id)}
-                          className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200 hover:bg-indigo-100 transition-all shadow-2xs">
-                          <BarChart2 className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Quality: {msg.evaluation.composite_score}/100</span>
-                          {openEvalId === msg.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                      )}
+            <AnimatePresence>
+              {messages.map((msg) => (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key={msg.id} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'} space-y-1.5`}>
+                  {msg.sender === 'user' ? (
+                    <div className="bg-gradient-to-r from-sky-600 to-indigo-600 text-white rounded-3xl rounded-tr-md px-5 py-3.5 max-w-[85%] md:max-w-2xl text-sm md:text-base font-medium shadow-soft">
+                      {msg.text}
                     </div>
-
-                    {/* Evaluation Metrics Card */}
-                    {msg.evaluation && openEvalId === msg.id && (
-                      <div className="bg-gradient-to-br from-indigo-50/80 via-slate-50 to-sky-50/80 border border-indigo-200 rounded-2xl p-3.5 md:p-4 text-xs space-y-3 animate-in slide-in-from-top-3 duration-250">
-                        <div className="flex items-center justify-between font-bold text-indigo-950">
-                          <span className="flex items-center gap-1.5"><Award className="w-4 h-4 text-indigo-600" /> RAG Quality Benchmarks</span>
-                          <span className="px-2 py-0.5 rounded-md bg-indigo-200 text-indigo-900 text-[10px] font-bold">{msg.evaluation.grade}</span>
+                  ) : (
+                    <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 md:p-7 w-full shadow-soft space-y-5">
+                      {msg.isEmergency && (
+                        <div className="bg-rose-50 dark:bg-rose-500/10 border-2 border-rose-500 dark:border-rose-500/30 rounded-2xl p-4 text-rose-800 dark:text-rose-300 text-xs md:text-sm font-bold flex items-center gap-2 shadow-sm">
+                          <AlertTriangle className="w-5 h-5 text-rose-600 animate-pulse shrink-0" />
+                          <p className="leading-relaxed whitespace-pre-line">{msg.emergencyMessage}</p>
                         </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      )}
+                      
+                      <div className="flex flex-wrap justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3 gap-3">
+                        <div className="flex items-center gap-2.5 font-bold text-sm text-slate-900 dark:text-white">
+                          <div className="w-8 h-8 bg-gradient-to-tr from-sky-500 to-indigo-500 rounded-xl flex items-center justify-center text-white text-[10px] shadow-sm">AI</div>
+                          Clinical Synthesis
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          {msg.evaluation && (
+                            <button onClick={() => setOpenEvalId(openEvalId === msg.id ? null : msg.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-[10px] md:text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
+                              <BarChart2 className="w-3.5 h-3.5" /> Score: {msg.evaluation.composite_score}/100
+                            </button>
+                          )}
+                          <CopyButton text={msg.text} />
+                        </div>
+                      </div>
+
+                      {msg.evaluation && openEvalId === msg.id && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-indigo-50 dark:bg-slate-800/80 border border-indigo-100 dark:border-slate-700 rounded-2xl p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
                           {[
-                            { label: "Groundedness", value: msg.evaluation.groundedness },
+                            { label: "Grounded", value: msg.evaluation.groundedness },
                             { label: "Similarity", value: msg.evaluation.semantic_similarity },
                             { label: "BLEU-4", value: msg.evaluation.bleu_score },
                             { label: "ROUGE-L", value: msg.evaluation.rouge_score }
                           ].map((metric, i) => (
-                            <div key={i} className="bg-white p-2.5 rounded-xl border border-indigo-100/80 text-center shadow-2xs animate-in zoom-in duration-300">
-                              <span className="text-[9px] text-slate-500 font-bold uppercase block">{metric.label}</span>
-                              <span className="text-sm md:text-base font-extrabold text-indigo-700">{typeof metric.value === 'number' ? metric.value.toFixed(1) : metric.value}%</span>
+                            <div key={i} className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-indigo-50 dark:border-slate-700 text-center shadow-sm">
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider block mb-1">{metric.label}</span>
+                              <span className="text-lg font-extrabold text-indigo-700 dark:text-indigo-400">{typeof metric.value === 'number' ? metric.value.toFixed(0) : metric.value}%</span>
                             </div>
                           ))}
-                        </div>
-                      </div>
-                    )}
+                        </motion.div>
+                      )}
 
-                    {/* Markdown Body with Interactive Mermaid Flowchart Parser */}
-                    <div className="prose prose-slate prose-sm md:prose-base max-w-none text-slate-800 leading-relaxed font-normal">
-                      <ReactMarkdown
-                        components={{
-                          code({ node, inline, className, children, ...props }) {
-                            const codeContent = String(children).replace(/\n$/, '');
-                            const isMermaid = !inline && (
-                              className?.includes('mermaid') || 
-                              codeContent.trim().startsWith('graph ') || 
-                              codeContent.trim().startsWith('flowchart ')
-                            );
-                            if (isMermaid) {
-                              return <MermaidDiagram chart={codeContent} />;
+                      <div className="markdown-body">
+                        <ReactMarkdown
+                          components={{
+                            code({ node, inline, className, children, ...props }) {
+                              const str = String(children).replace(/\n$/, '');
+                              const isMermaid = !inline && (className?.includes('mermaid') || str.startsWith('graph '));
+                              if (isMermaid) return <MermaidDiagram chart={str} />;
+                              return <code className={className} {...props}>{children}</code>;
                             }
-                            return (
-                              <code className={className} {...props}>
-                                {children}
-                              </code>
-                            );
-                          }
-                        }}
-                      >
-                        {msg.text}
-                      </ReactMarkdown>
-                    </div>
-
-                    {/* PubMed Citations */}
-                    {msg.pubmedSources?.length > 0 && (
-                      <div className="pt-3 border-t border-slate-100 space-y-2">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-900 uppercase tracking-wider">
-                          <Microscope className="w-4 h-4 text-indigo-600" /> Live NIH PubMed Citations ({msg.pubmedSources.length})
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {msg.pubmedSources.map((paper, idx) => (
-                            <div key={idx} className="bg-indigo-50/40 p-3 rounded-xl border border-indigo-100/90 text-xs space-y-1 hover:border-indigo-300 transition-colors">
-                              <a href={paper.url} target="_blank" rel="noopener noreferrer" 
-                                className="font-bold text-indigo-900 hover:text-indigo-600 flex items-center justify-between gap-1 leading-snug">
-                                <span className="line-clamp-2">{paper.title}</span>
-                                <ExternalLink className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                              </a>
-                              <div className="text-[10px] text-indigo-700 font-medium">
-                                {paper.journal} ({paper.year}) • <strong className="font-mono bg-indigo-100 px-1 py-0.5 rounded text-indigo-900">PMID:{paper.pmid}</strong>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
+                          }}
+                        >
+                          {msg.text}
+                        </ReactMarkdown>
                       </div>
-                    )}
 
-                    <div className="text-[9px] text-slate-400 text-right pt-1">{msg.timestamp}</div>
-                  </div>
-                )}
-              </div>
-            ))}
+                      {msg.pubmedSources?.length > 0 && (
+                        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
+                          <div className="text-xs font-bold text-indigo-800 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                            <Microscope className="w-4 h-4" /> Live PubMed Citations
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {msg.pubmedSources.map((p, i) => (
+                              <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500 transition-colors group">
+                                <div className="flex justify-between items-start gap-2 mb-1.5">
+                                  <strong className="text-slate-900 dark:text-white text-xs md:text-sm line-clamp-2 leading-snug group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">{p.title}</strong>
+                                  <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" />
+                                </div>
+                                <div className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{p.journal} ({p.year}) • <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">PMID: {p.pmid}</span></div>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
 
-            {/* Loading Indicator */}
             {loading && (
-              <div className="bg-white rounded-2xl border border-slate-200 p-4 max-w-md shadow-xs space-y-2.5 animate-pulse">
-                <div className="flex items-center gap-2.5 text-sky-800 font-bold text-xs md:text-sm">
-                  <Activity className="w-4 h-4 animate-spin text-teal-600" /> Retrieving Textbooks & Live PubMed Papers...
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 max-w-sm shadow-soft flex items-center gap-4">
+                <Activity className="w-5 h-5 text-sky-500 animate-spin shrink-0" />
+                <div className="space-y-1 w-full">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Synthesizing response...</span>
+                  <div className="h-1.5 shimmer rounded-full w-full" />
                 </div>
-                <div className="space-y-1.5">
-                  <div className="h-2 bg-slate-100 rounded-full w-4/5"></div>
-                  <div className="h-2 bg-slate-100 rounded-full w-3/5"></div>
-                </div>
-              </div>
+              </motion.div>
             )}
             <div ref={messagesEndRef} />
-          </main>
+          </div>
 
-          {/* Sticky Input Bar */}
-          <footer className="bg-white/95 backdrop-blur-md border border-slate-200 p-2.5 md:p-3 rounded-2xl shadow-sm sticky bottom-2 z-20 mt-2">
-            <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-center gap-2">
-              <input type="text" value={input} onChange={(e) => setInput(e.target.value)} 
-                placeholder="Ask a clinical question (e.g. step-by-step algorithms, dosages, trials)..." disabled={loading}
-                className="flex-1 bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white text-slate-900 placeholder-slate-400 rounded-xl px-3.5 py-2.5 text-xs md:text-sm outline-none transition-all disabled:opacity-50" />
-              <button type="submit" disabled={loading || !input.trim()}
-                className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 text-xs md:text-sm shrink-0">
-                Send <Send className="w-3.5 h-3.5" />
+          <footer className="sticky bottom-4 z-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-slate-700 p-2.5 rounded-2xl shadow-elevated">
+            <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2">
+              <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask a clinical question..." disabled={loading}
+                className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-sky-500/50 transition-all" />
+              <button type="submit" disabled={loading || !input.trim()} className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold px-6 rounded-xl shadow-soft transition-all disabled:opacity-50">
+                <Send className="w-4 h-4" />
               </button>
             </form>
           </footer>
-        </div>
+        </main>
       )}
 
-      {/* ═══════════ REPORT ANALYZER TAB ═══════════ */}
+      {/* ── REPORT ANALYZER TAB ── */}
       {activeTab === 'report' && (
-        <main className="flex-1 p-3 md:p-6 space-y-5 max-w-6xl mx-auto w-full animate-in fade-in duration-400">
+        <main className="flex-1 max-w-6xl mx-auto w-full p-4 md:p-6 space-y-6">
           
-          {/* Header Banner */}
-          <div className="bg-gradient-to-br from-teal-700 via-sky-800 to-indigo-900 rounded-3xl p-5 md:p-8 text-white shadow-md">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div className="space-y-1.5">
-                <div className="inline-flex items-center gap-1.5 bg-white/15 px-3 py-1 rounded-full text-[11px] font-bold">
-                  <FlaskConical className="w-3.5 h-3.5" /> Phase 2 Module • Two-Brain Clinical Architecture
+          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden bg-gradient-to-br from-teal-700 via-sky-800 to-indigo-900 rounded-3xl p-6 md:p-10 text-white shadow-elevated">
+            <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+            <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
+              <div className="space-y-3 text-center md:text-left">
+                <div className="inline-flex items-center gap-1.5 bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-bold">
+                  <BrainCircuit className="w-4 h-4" /> Two-Brain RAG Architecture
                 </div>
-                <h2 className="text-xl md:text-3xl font-extrabold">Blood Test & Lab Report Analyzer</h2>
-                <p className="text-sky-100 text-xs md:text-sm max-w-2xl leading-relaxed">
-                  Extracts 100+ parameters, groups values by organ system, arranges differential diagnoses by clinical prevalence (Common → Rare), and exports physician-grade PDF summaries.
-                </p>
+                <h2 className="text-xl md:text-3xl font-extrabold tracking-tight">Blood Test & Lab Report Analyzer</h2>
+                <p className="text-sky-100 text-xs md:text-sm max-w-xl">Extracts 100+ parameters, groups values by organ system, arranges differentials by prevalence, and exports PDF summaries.</p>
               </div>
+              <Dna className="w-16 h-16 text-teal-300/50 hidden md:block" />
             </div>
-          </div>
+          </motion.div>
 
-          {/* Upload Card */}
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-4">
-            <form onSubmit={handleReportUpload} className="space-y-4">
-              <div onDragOver={(e) => { e.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={onDrop}
-                className={`border-2 border-dashed rounded-2xl md:rounded-3xl p-6 md:p-8 text-center transition-all ${dragActive ? 'border-teal-500 bg-teal-50/50' : 'border-slate-300 bg-slate-50/60 hover:border-teal-400'}`}>
-                <div className="w-12 h-12 md:w-14 md:h-14 mx-auto mb-3 rounded-2xl bg-white border border-slate-200 shadow-2xs flex items-center justify-center">
-                  <UploadCloud className="w-7 h-7 text-teal-600 animate-bounce" />
-                </div>
-                <h3 className="text-sm md:text-base font-bold text-slate-900 mb-0.5">Upload Clinical Lab PDF</h3>
-                <p className="text-xs text-slate-500 mb-3">Drop file here or click below</p>
-                <label className="cursor-pointer inline-block">
-                  <span className="bg-teal-600 hover:bg-teal-700 text-white text-xs md:text-sm font-bold px-4 md:px-5 py-2.5 rounded-xl transition-all inline-flex items-center gap-2 shadow-xs">
-                    <FileText className="w-4 h-4" /> Select PDF File
-                  </span>
-                  <input type="file" accept=".pdf" onChange={(e) => setReportFile(e.target.files?.[0] || null)} className="hidden" />
-                </label>
-                <div className="mt-3 text-[11px] text-slate-500">
-                  {reportFile ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-teal-50 text-teal-800 font-bold border border-teal-200">
-                      <FileCheck className="w-3.5 h-3.5 text-teal-600 animate-pulse" /> {reportFile.name} ({(reportFile.size / 1024).toFixed(1)} KB)
-                    </span>
-                  ) : "Supports complete blood panels, metabolic, renal, liver, lipid, and endocrine profiles."}
-                </div>
-              </div>
-
-              {reportError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 shrink-0" /> {reportError}
-                </div>
-              )}
-
-              <button type="submit" disabled={!reportFile || reportLoading}
-                className="w-full bg-gradient-to-r from-teal-600 via-sky-600 to-indigo-600 hover:opacity-95 disabled:opacity-50 text-white font-bold text-xs md:text-sm py-3 md:py-3.5 rounded-2xl transition-all shadow-xs flex items-center justify-center gap-2">
-                {reportLoading ? (
-                  <><Activity className="w-4 h-4 animate-spin" /> Extracting All Lab Parameters & Performing Clinical Reasoning...</>
-                ) : (
-                  <><Sparkles className="w-4 h-4 animate-pulse" /> Analyze Lab Report with Two-Brain RAG</>
-                )}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-6 md:p-8 text-center">
+            <form onSubmit={handleReportUpload} className="max-w-lg mx-auto">
+              <label className="cursor-pointer block border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-8 hover:border-teal-500 dark:hover:border-teal-400 transition-colors group">
+                <TestTubes className="w-12 h-12 text-teal-500 mx-auto mb-3 group-hover:scale-110 transition-transform" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">Upload Clinical PDF</h3>
+                <span className="text-xs text-slate-500">Supports CBC, Metabolic, Lipid, Renal, Thyroid profiles</span>
+                <input type="file" accept=".pdf" onChange={(e) => setReportFile(e.target.files?.[0])} className="hidden" />
+              </label>
+              {reportFile && <div className="mt-4 text-sm font-bold text-teal-600 dark:text-teal-400 flex items-center justify-center gap-2"><FileCheck className="w-4 h-4" /> {reportFile.name}</div>}
+              {reportError && <div className="mt-4 text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/30 p-3 rounded-xl flex justify-center gap-2"><AlertTriangle className="w-4 h-4"/> {reportError}</div>}
+              
+              <button type="submit" disabled={!reportFile || reportLoading} className="mt-5 w-full px-8 py-3.5 bg-gradient-to-r from-teal-600 to-sky-600 text-white rounded-xl font-bold text-sm hover:shadow-glow-sky disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {reportLoading ? <><Activity className="w-5 h-5 animate-spin" /> Performing RAG Clinical Analysis...</> : <><Sparkles className="w-5 h-5" /> Analyze Report</>}
               </button>
             </form>
-          </div>
+          </motion.div>
 
-          {/* ═══════════ ANALYSIS RESULTS DASHBOARD ═══════════ */}
           {reportResult && !reportLoading && (
-            <div className="space-y-5 animate-in fade-in duration-300">
+            <div className="space-y-6">
               
-              {/* Critical Alerts */}
               {reportResult.critical_alerts?.length > 0 && (
-                <div className="bg-rose-50 border-2 border-rose-500 rounded-3xl p-4 md:p-5 text-rose-900 space-y-2 shadow-xs">
-                  <div className="flex items-center gap-2 font-bold text-sm md:text-base text-rose-700">
-                    <AlertOctagon className="w-5 h-5 text-rose-600 animate-bounce" /> CRITICAL LABORATORY ALERTS DETECTED
+                <div className="bg-rose-50 dark:bg-rose-900/30 border-2 border-rose-500 dark:border-rose-700 rounded-3xl p-5 text-rose-900 dark:text-rose-200 shadow-soft">
+                  <div className="flex items-center gap-2 font-bold text-base text-rose-700 dark:text-rose-400 mb-3">
+                    <AlertOctagon className="w-6 h-6 animate-pulse" /> CRITICAL LAB ALERTS
                   </div>
-                  <ul className="list-disc pl-5 text-xs font-semibold space-y-1 text-rose-800">
-                    {reportResult.critical_alerts.map((alert, idx) => <li key={idx}>{alert}</li>)}
-                  </ul>
+                  <ul className="list-disc pl-6 text-sm font-semibold space-y-1.5">{reportResult.critical_alerts.map((a, i) => <li key={i}>{a}</li>)}</ul>
                 </div>
               )}
 
-              {/* Patient Metadata & Actions */}
-              <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
-                  <h3 className="text-base md:text-lg font-bold text-slate-900 flex items-center gap-2">
-                    <CheckCircle2 className="text-teal-600 w-5 h-5" /> {reportResult.file_name}
+              <div className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8 space-y-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+                  <h3 className="font-extrabold text-lg md:text-xl text-slate-900 dark:text-white flex items-center gap-2">
+                    <CheckCircle2 className="text-teal-500 w-6 h-6" /> {reportResult.file_name}
                   </h3>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <RiskBanner risk={reportResult.risk_level} />
-                    <button onClick={() => exportClinicalPDF(reportResult)}
-                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white transition-all shadow-xs active:scale-95">
-                      <Download className="w-3.5 h-3.5" /> Export PDF
+                    <button onClick={() => exportClinicalPDF(reportResult)} className="bg-sky-600 hover:bg-sky-700 text-white text-xs px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-colors">
+                      <Download className="w-4 h-4" /> Export PDF
                     </button>
                   </div>
                 </div>
 
-                {/* Patient Info Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 bg-slate-50 border border-slate-200/80 rounded-2xl p-3 md:p-4 text-xs">
-                  <div><span className="text-slate-400 font-bold block text-[9px] uppercase">Patient</span><span className="font-bold text-slate-800 text-xs md:text-sm flex items-center gap-1"><User className="w-3.5 h-3.5 text-sky-600" />{reportResult.patient_name || 'Patient'}</span></div>
-                  <div><span className="text-slate-400 font-bold block text-[9px] uppercase">Age / Sex</span><span className="font-bold text-slate-800 text-xs md:text-sm">{reportResult.patient_age_gender || 'N/A'}</span></div>
-                  <div><span className="text-slate-400 font-bold block text-[9px] uppercase">Laboratory</span><span className="font-bold text-slate-800 text-xs md:text-sm truncate flex items-center gap-1"><Building className="w-3.5 h-3.5 text-indigo-600" />{reportResult.lab_name || 'Diagnostic Lab'}</span></div>
-                  <div><span className="text-slate-400 font-bold block text-[9px] uppercase">Report Date</span><span className="font-bold text-slate-800 text-xs md:text-sm flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-emerald-600" />{reportResult.report_date || 'N/A'}</span></div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4 text-xs md:text-sm">
+                  {[
+                    { l: 'Patient', v: reportResult.patient_name, i: User, c: 'text-sky-600' },
+                    { l: 'Age/Sex', v: reportResult.patient_age_gender, i: Activity, c: 'text-indigo-600' },
+                    { l: 'Lab', v: reportResult.lab_name, i: Building, c: 'text-purple-600' },
+                    { l: 'Date', v: reportResult.report_date, i: Calendar, c: 'text-emerald-600' }
+                  ].map((x, i) => (
+                    <div key={i}><span className="text-slate-400 text-[10px] font-bold uppercase block mb-1">{x.l}</span><strong className="text-slate-900 dark:text-white flex items-center gap-1.5 truncate"><x.i className={`w-4 h-4 ${x.c}`} />{x.v}</strong></div>
+                  ))}
                 </div>
 
                 {reportResult.summary && (
-                  <div className="bg-gradient-to-br from-slate-50 to-sky-50/50 border border-slate-200 rounded-2xl p-4 shadow-2xs">
-                    <div className="text-[11px] font-bold text-sky-900 uppercase tracking-wider mb-1 flex items-center gap-1">
-                      <ClipboardList className="w-3.5 h-3.5 text-sky-600" /> Executive Clinical Summary
+                  <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800/50 rounded-2xl p-5">
+                    <div className="text-xs font-bold text-sky-800 dark:text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <ClipboardList className="w-4 h-4" /> Executive Summary
                     </div>
-                    <p className="text-xs md:text-sm font-medium text-slate-800 leading-relaxed">{reportResult.summary}</p>
+                    <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-medium">{reportResult.summary}</p>
                   </div>
                 )}
               </div>
 
-              {/* Lab Values Grid with System Grouping */}
               {reportResult.lab_values?.length > 0 && (
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
-                    <div>
-                      <h4 className="text-sm md:text-base font-bold text-slate-900 flex items-center gap-1.5">
-                        <FlaskConical className="w-4 h-4 text-teal-600" /> Extracted Laboratory Parameters ({labCounts.total})
-                      </h4>
-                      <p className="text-[11px] text-slate-500">Grouped by organ systems with status filters.</p>
-                    </div>
-                    <div className="flex items-center gap-1.5 text-[11px] font-bold">
-                      <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border">Total: {labCounts.total}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 animate-pulse">🔴 {labCounts.high}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">🟡 {labCounts.low}</span>
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">🟢 {labCounts.normal}</span>
+                <div className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4 mb-5">
+                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-2"><TestTubes className="w-5 h-5 text-teal-500" /> Extracted Parameters</h4>
+                    <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
+                      {['ALL', 'HIGH', 'LOW', 'NORMAL'].map(f => (
+                        <button key={f} onClick={() => setLabFilter(f)} className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-colors ${labFilter === f ? 'bg-teal-600 text-white border-teal-600 shadow-sm' : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>{f}</button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Filter Pills */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold">
-                    <span className="text-slate-400 flex items-center gap-1 text-[11px]"><Filter className="w-3 h-3"/> Filter:</span>
-                    {['ALL', 'ABNORMAL', 'HIGH', 'LOW', 'NORMAL'].map((f) => (
-                      <button key={f} onClick={() => setLabFilter(f)}
-                        className={`px-3 py-1 rounded-xl border text-xs transition-all ${labFilter === f ? 'bg-teal-600 text-white border-teal-600 shadow-2xs' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border-slate-200'}`}>
-                        {f === 'ALL' ? 'All' : f === 'ABNORMAL' ? '⚠️ Abnormal' : f}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Grouped Organ System Cards */}
-                  <div className="space-y-5 pt-1">
-                    {Object.keys(getGroupedLabs()).length === 0 ? (
-                      <div className="text-center py-6 text-xs text-slate-400">No lab parameters match filter ({labFilter}).</div>
-                    ) : (
-                      Object.entries(getGroupedLabs()).map(([systemName, labs]) => (
-                        <div key={systemName} className="space-y-2.5">
-                          <h5 className="text-[11px] font-bold uppercase tracking-wider text-teal-900 bg-teal-50 border border-teal-200/80 px-3 py-1 rounded-xl inline-flex items-center gap-1.5 animate-in slide-in-from-left duration-250">
-                            <Layers className="w-3.5 h-3.5 text-teal-600" /> {systemName} ({labs.length})
-                          </h5>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                            {labs.map((lab, idx) => {
-                              const status = (lab.status || "UNKNOWN").toUpperCase();
-                              const border = status === "HIGH" ? "border-rose-200 bg-rose-50/30" : status === "LOW" ? "border-amber-200 bg-amber-50/30" : status === "NORMAL" ? "border-emerald-200 bg-emerald-50/20" : "border-slate-200 bg-white";
-                              return (
-                                <div key={idx} className={`rounded-2xl border p-3 shadow-2xs ${border} hover:scale-[1.01] transition-transform duration-200`}>
-                                  <div className="flex items-start justify-between gap-1 mb-1">
-                                    <div className="text-xs font-bold text-slate-800 leading-snug">{lab.test}</div>
-                                    <StatusBadge status={status} />
-                                  </div>
-                                  <div className="text-lg font-extrabold text-slate-900">{lab.result} <span className="text-[11px] font-semibold text-slate-500">{lab.unit}</span></div>
-                                  <div className="text-[10px] text-slate-500 mt-0.5">Ref Range: {lab.reference_range || "N/A"}</div>
+                  <div className="space-y-6">
+                    {Object.entries(groupedLabs).map(([sys, labs], sIdx) => (
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: sIdx * 0.1 }} key={sys} className="space-y-3">
+                        <h5 className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800/50 px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5">
+                          <Layers className="w-4 h-4 text-teal-600 dark:text-teal-400" /> {sys} ({labs.length})
+                        </h5>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                          {labs.map((lab, i) => {
+                            const st = (lab.status || "").toUpperCase();
+                            const bClass = st === "HIGH" ? "border-rose-200 bg-rose-50/50 dark:border-rose-800/50 dark:bg-rose-900/10" : st === "LOW" ? "border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-900/10" : st === "NORMAL" ? "border-emerald-200 bg-emerald-50/30 dark:border-emerald-800/50 dark:bg-emerald-900/10" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/50";
+                            return (
+                              <div key={i} className={`p-4 rounded-2xl border ${bClass} shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all`}>
+                                <div className="flex justify-between items-start mb-2">
+                                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 pr-2 leading-tight">{lab.test}</span>
+                                  <StatusBadge status={st} />
                                 </div>
-                              );
-                            })}
-                          </div>
+                                <div className="text-xl font-extrabold text-slate-900 dark:text-white">{lab.result} <span className="text-[10px] font-medium text-slate-500">{lab.unit}</span></div>
+                                <div className="text-[10px] text-slate-500 mt-1">Ref: {lab.reference_range}</div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Prevalence-Ordered Differentials */}
-              {reportResult.differential_considerations?.length > 0 && (
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-3">
-                  <div className="border-b border-slate-100 pb-3">
-                    <h4 className="text-sm md:text-base font-bold text-slate-900 flex items-center gap-2">
-                      <Compass className="w-4 h-4 text-indigo-600" /> Differential Considerations (Ordered by Prevalence)
-                    </h4>
-                    <p className="text-[11px] text-slate-500">Ranked from highest epidemiological likelihood to rare atypical patterns.</p>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 animate-in zoom-in-95 duration-350">
-                    {reportResult.differential_considerations.map((item, idx) => (
-                      <div key={idx} className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/50 p-4 space-y-2 shadow-2xs hover:border-indigo-300 transition-all hover:shadow duration-200">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="font-bold text-xs md:text-sm text-slate-900 flex items-center gap-1.5">
-                            <span className="w-5 h-5 rounded-lg bg-indigo-100 text-indigo-800 text-[10px] flex items-center justify-center font-extrabold">{idx + 1}</span>
-                            {item.title}
-                          </div>
-                          <PrevalenceBadge prevalence={item.prevalence} />
-                        </div>
-                        <p className="text-xs text-slate-600 leading-relaxed pl-6.5">{item.rationale}</p>
-                      </div>
+                      </motion.div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Pathophysiology & Recommendations */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {reportResult.differential_considerations?.length > 0 && (
+                <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 md:p-8 shadow-soft">
+                  <div className="border-b border-slate-100 dark:border-slate-800 pb-3 mb-5">
+                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-2"><Target className="w-5 h-5 text-indigo-500" /> Differential Considerations</h4>
+                    <p className="text-xs text-slate-500 mt-1">Ranked from highest epidemiological likelihood to rare atypical patterns.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {reportResult.differential_considerations.map((diff, idx) => (
+                      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: idx * 0.1 }} key={idx} 
+                        className="p-5 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                        <div className="flex justify-between items-start mb-3 gap-2">
+                          <strong className="text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs">{idx+1}</span>
+                            {diff.title}
+                          </strong>
+                          <PrevalenceBadge prevalence={diff.prevalence} />
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed pl-8">{diff.rationale}</p>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {reportResult.pathophysiology && (
-                  <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-2.5">
-                    <h4 className="text-xs md:text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                      <ScopeIcon className="text-indigo-600 w-4 h-4"/> Inter-Organ Pathophysiological Assessment
-                    </h4>
-                    <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-line">{reportResult.pathophysiology}</p>
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-3 flex items-center gap-2"><Brain className="w-4 h-4 text-indigo-500"/> Pathophysiology</h4>
+                    <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{reportResult.pathophysiology}</p>
                   </div>
                 )}
 
                 {reportResult.recommendations && (
-                  <div className="bg-white rounded-3xl border border-slate-200 shadow-xs p-4 md:p-6 space-y-3">
-                    <h4 className="text-xs md:text-sm font-bold text-slate-900 flex items-center gap-1.5 border-b border-slate-100 pb-2.5">
-                      <ClipboardList className="text-teal-600 w-4 h-4"/> Evidence-Based Action Plan
-                    </h4>
-                    <div className="space-y-2.5 text-xs animate-in zoom-in-95 duration-250">
+                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft space-y-4">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-2"><ClipboardList className="w-4 h-4 text-teal-500"/> Action Plan</h4>
+                    <div className="space-y-3 text-xs">
                       {reportResult.recommendations.urgent_actions?.length > 0 && (
-                        <div className="bg-rose-50 p-3 rounded-2xl border border-rose-200/80">
-                          <div className="font-bold text-rose-800 flex items-center gap-1.5 mb-1"><AlertTriangle className="w-3.5 h-3.5 text-rose-600 animate-pulse" /> Urgent Triage Actions</div>
-                          <ul className="list-disc pl-5 text-rose-900 space-y-0.5">{reportResult.recommendations.urgent_actions.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                        <div className="bg-rose-50 dark:bg-rose-900/20 p-4 rounded-2xl border border-rose-200 dark:border-rose-800/50">
+                          <strong className="text-rose-800 dark:text-rose-300 flex items-center gap-1.5 mb-2"><AlertTriangle className="w-4 h-4 text-rose-500" /> Urgent Actions</strong>
+                          <ul className="list-disc pl-5 text-rose-900 dark:text-rose-200 space-y-1">{reportResult.recommendations.urgent_actions.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.further_tests?.length > 0 && (
-                        <div className="bg-sky-50 p-3 rounded-2xl border border-sky-200/80">
-                          <div className="font-bold text-sky-800 flex items-center gap-1.5 mb-1"><TestTube className="w-3.5 h-3.5 text-sky-600" /> Recommended Follow-Up Investigations</div>
-                          <ul className="list-disc pl-5 text-sky-900 space-y-0.5">{reportResult.recommendations.further_tests.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                        <div className="bg-sky-50 dark:bg-sky-900/20 p-4 rounded-2xl border border-sky-200 dark:border-sky-800/50">
+                          <strong className="text-sky-800 dark:text-sky-300 flex items-center gap-1.5 mb-2"><TestTube className="w-4 h-4 text-sky-500" /> Further Tests</strong>
+                          <ul className="list-disc pl-5 text-sky-900 dark:text-sky-200 space-y-1">{reportResult.recommendations.further_tests.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.specialty_consultation?.length > 0 && (
-                        <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-200/80">
-                          <div className="font-bold text-indigo-800 flex items-center gap-1.5 mb-1"><UserPlus className="w-3.5 h-3.5 text-indigo-600" /> Specialty Consultations</div>
-                          <ul className="list-disc pl-5 text-indigo-900 space-y-0.5">{reportResult.recommendations.specialty_consultation.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                        <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800/50">
+                          <strong className="text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5 mb-2"><UserPlus className="w-4 h-4 text-indigo-500" /> Specialist Consultations</strong>
+                          <ul className="list-disc pl-5 text-indigo-900 dark:text-indigo-200 space-y-1">{reportResult.recommendations.specialty_consultation.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.lifestyle_modifications?.length > 0 && (
-                        <div className="bg-emerald-50 p-3 rounded-2xl border border-emerald-200/80">
-                          <div className="font-bold text-emerald-800 flex items-center gap-1.5 mb-1"><Leaf className="w-3.5 h-3.5 text-emerald-600" /> Lifestyle & Dietary Optimization</div>
-                          <ul className="list-disc pl-5 text-emerald-900 space-y-0.5">{reportResult.recommendations.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50">
+                          <strong className="text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-2"><Leaf className="w-4 h-4 text-emerald-500" /> Lifestyle</strong>
+                          <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.recommendations.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                     </div>
                   </div>
                 )}
-              </div>
-
-              {/* Standard Medical Disclaimer */}
-              <div className="text-[11px] text-slate-500 bg-slate-100 border border-slate-200/80 rounded-2xl px-4 py-3 text-center">
-                <strong>Clinical Decision-Support Disclaimer:</strong> This automated laboratory analysis is synthesized for educational and preliminary triage evaluation. All parameters must be interpreted by a licensed clinical physician.
               </div>
             </div>
           )}
