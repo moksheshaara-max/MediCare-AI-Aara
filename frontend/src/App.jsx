@@ -10,7 +10,7 @@ import {
   X, Trash2, Download, Filter, UserPlus, Leaf, TestTube, 
   TestTubes, User, Calendar, Building, ChevronDown, ChevronUp, 
   BarChart2, Layers, GitBranch, Moon, Sun, Copy, Check, RotateCcw, 
-  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target
+  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target, Zap
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://medicare-ai-aara-backend.onrender.com";
@@ -36,7 +36,35 @@ const SUGGESTED_PROMPTS = [
   { icon: '🚨', text: "I have severe crushing chest pain radiating to the jaw with shortness of breath." },
 ];
 
-/* ── PREMIUM COMPONENTS ── */
+/* ═══════════════════════════════════════════
+   PREMIUM ICON CONTAINER
+   ═══════════════════════════════════════════ */
+function PremiumIcon({ Icon, gradient = "from-sky-500 to-indigo-600", size = "lg", glow = "sky" }) {
+  const sizes = {
+    sm: "w-8 h-8 rounded-lg",
+    md: "w-10 h-10 rounded-xl",
+    lg: "w-14 h-14 rounded-2xl",
+    xl: "w-16 h-16 md:w-20 md:h-20 rounded-3xl"
+  };
+  const iconSizes = {
+    sm: "w-4 h-4",
+    md: "w-5 h-5",
+    lg: "w-7 h-7",
+    xl: "w-8 h-8 md:w-10 md:h-10"
+  };
+  const glows = {
+    sky: "shadow-[0_8px_30px_rgba(14,165,233,0.35)]",
+    teal: "shadow-[0_8px_30px_rgba(20,184,166,0.35)]",
+    rose: "shadow-[0_8px_30px_rgba(244,63,94,0.35)]",
+    indigo: "shadow-[0_8px_30px_rgba(99,102,241,0.35)]"
+  };
+  return (
+    <div className={`${sizes[size]} bg-gradient-to-br ${gradient} ${glows[glow]} flex items-center justify-center shrink-0`}>
+      <Icon className={`${iconSizes[size]} text-white`} strokeWidth={2.5} />
+    </div>
+  );
+}
+
 function MermaidDiagram({ chart }) {
   const [svgContent, setSvgContent] = useState('');
   const [renderError, setRenderError] = useState(false);
@@ -68,7 +96,7 @@ function MermaidDiagram({ chart }) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="my-4 p-3 md:p-5 bg-gradient-to-br from-sky-50/60 via-white to-indigo-50/40 dark:from-slate-800/60 dark:via-[#131a2c] dark:to-slate-800/40 border border-sky-200/70 dark:border-slate-700 rounded-2xl shadow-soft overflow-hidden">
       <div className="w-full flex items-center justify-between text-[10px] font-bold text-sky-700 dark:text-sky-400 uppercase tracking-wider mb-3 border-b border-sky-100 dark:border-slate-700 pb-2">
-        <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Clinical Decision Algorithm</span>
+        <span className="flex items-center gap-1.5"><GitBranch className="w-3.5 h-3.5" strokeWidth={2.5} /> Clinical Decision Algorithm</span>
         <button onClick={() => setIsExpanded(!isExpanded)} className="text-slate-500 hover:text-sky-600 transition-colors flex items-center gap-1">
           {isExpanded ? 'Collapse' : 'Expand'} <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
         </button>
@@ -89,7 +117,7 @@ function StatusBadge({ status }) {
   const Icon = c.icon;
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${c.bg}`}>
-      <Icon className="w-2.5 h-2.5" /> {s}
+      <Icon className="w-2.5 h-2.5" strokeWidth={2.75} /> {s}
     </span>
   );
 }
@@ -119,7 +147,7 @@ function RiskBanner({ risk }) {
   return (
     <div className={`rounded-xl border px-3.5 py-2 shadow-soft ${styles[r] || styles.MODERATE}`}>
       <div className="flex items-center gap-1.5 font-bold text-xs md:text-sm">
-        <ShieldAlert className="w-4 h-4 shrink-0 text-current" /> Risk Triage: {r}
+        <ShieldAlert className="w-4 h-4 shrink-0 text-current" strokeWidth={2.5} /> Risk Triage: {r}
       </div>
     </div>
   );
@@ -132,7 +160,7 @@ function CopyButton({ text }) {
   };
   return (
     <button onClick={handleCopy} className="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 dark:hover:text-sky-400 transition-colors">
-      {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+      {copied ? <Check className="w-4 h-4 text-emerald-500" strokeWidth={2.5} /> : <Copy className="w-4 h-4" strokeWidth={2.25} />}
     </button>
   );
 }
@@ -259,13 +287,6 @@ export default function App() {
     } finally { setLoading(false); }
   };
 
-  const handleRegenerate = (msgId) => {
-    const msg = messages.find(m => m.id === msgId);
-    if (!msg || !msg.question) return;
-    setMessages(prev => prev.filter(m => m.id !== msgId));
-    setTimeout(() => handleSend(msg.question), 100);
-  };
-
   const handleReportUpload = async (e) => {
     e.preventDefault();
     if (!reportFile || reportLoading) return;
@@ -312,6 +333,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Auto-focus the input when the chat tab opens with no messages
+  useEffect(() => {
+    if (activeTab === 'chat' && messages.length === 0) {
+      const t = setTimeout(() => inputRef.current?.focus(), 300);
+      return () => clearTimeout(t);
+    }
+  }, [activeTab, messages.length]);
+
   return (
     <div className="flex flex-col min-h-screen relative overflow-x-hidden transition-colors">
       
@@ -321,14 +350,14 @@ export default function App() {
         <div className="absolute top-1/2 -left-32 w-96 h-96 bg-gradient-to-br from-teal-200/30 to-emerald-200/20 dark:from-teal-900/30 dark:to-emerald-900/20 rounded-full blur-3xl" />
       </div>
 
-      {/* ── UNIFIED RESPONSIVE HEADER ── */}
+      {/* ── HEADER ── */}
       <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 shadow-sm w-full">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-6">
           
           <div className="flex items-center justify-between w-full md:w-auto">
             <div className="flex items-center gap-3">
-              <motion.div whileHover={{ scale: 1.05 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2 rounded-xl shadow-glow-sky shrink-0">
-                <Stethoscope className="w-5 h-5 md:w-6 md:h-6" />
+              <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2.5 rounded-xl shadow-glow-sky shrink-0">
+                <Stethoscope className="w-5 h-5 md:w-6 md:h-6" strokeWidth={2.5} />
               </motion.div>
               <div>
                 <div className="flex items-center gap-1.5">
@@ -339,34 +368,31 @@ export default function App() {
               </div>
             </div>
             
-            {/* Mobile Actions */}
             <div className="flex md:hidden items-center gap-1.5">
               <button onClick={() => setShowTransparency(true)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                <Info className="w-4 h-4" />
+                <Info className="w-4 h-4" strokeWidth={2.25} />
               </button>
               <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                {darkMode ? <Sun className="w-4 h-4" strokeWidth={2.25} /> : <Moon className="w-4 h-4" strokeWidth={2.25} />}
               </button>
             </div>
           </div>
 
-          {/* Navigation Tabs (Mobile adapts to full width) */}
           <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1.5 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
             <button onClick={() => setActiveTab('chat')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'chat' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
-              <MessageCircle className="w-4 h-4" /> Clinical Assistant
+              <MessageCircle className="w-4 h-4" strokeWidth={2.25} /> Clinical Assistant
             </button>
             <button onClick={() => setActiveTab('report')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'report' ? 'bg-white dark:bg-slate-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
-              <FileSearch className="w-4 h-4" /> Lab Analyzer
+              <FileSearch className="w-4 h-4" strokeWidth={2.25} /> Lab Analyzer
             </button>
           </div>
 
-          {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-2.5">
             <button onClick={() => setShowTransparency(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
-              <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" /> Transparency
+              <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" strokeWidth={2.25} /> Transparency
             </button>
             <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 transition hover:bg-slate-200 dark:hover:bg-slate-700">
-              {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {darkMode ? <Sun className="w-4 h-4" strokeWidth={2.25} /> : <Moon className="w-4 h-4" strokeWidth={2.25} />}
             </button>
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border ${serverHealth.online ? 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800'}`}>
               <span className={`w-2 h-2 rounded-full ${serverHealth.online ? 'bg-emerald-500 pulse-ring' : 'bg-amber-500'}`} />
@@ -381,22 +407,22 @@ export default function App() {
         {showTransparency && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setShowTransparency(false)}>
             <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-white dark:bg-[#131a2c] rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-slate-200 dark:border-slate-800" onClick={e => e.stopPropagation()}>
-              <h3 className="font-extrabold text-xl mb-5 text-slate-900 dark:text-white flex items-center gap-2">
-                <div className="bg-sky-100 dark:bg-sky-900/40 p-2 rounded-xl text-sky-600 dark:text-sky-400"><Info className="w-5 h-5"/></div>
+              <h3 className="font-extrabold text-xl mb-5 text-slate-900 dark:text-white flex items-center gap-3">
+                <PremiumIcon Icon={Info} gradient="from-sky-500 to-indigo-600" size="md" glow="sky" />
                 System Transparency
               </h3>
               <div className="text-sm text-slate-600 dark:text-slate-400 space-y-4">
                 <div className="p-4 bg-sky-50 dark:bg-sky-900/20 rounded-xl text-sky-900 dark:text-sky-300 font-medium border border-sky-100 dark:border-sky-800/50">
-                  {serverHealth.chunks.toLocaleString()} verified textbook chunks indexed + Live PubMed.
+                  <strong>{serverHealth.chunks.toLocaleString()}</strong> verified textbook chunks indexed + Live PubMed.
                 </div>
                 <div className="space-y-3">
-                  <p className="flex gap-2"><span className="text-lg">🎯</span><span><strong>Vector Score:</strong> 768-D cosine similarity.</span></p>
-                  <p className="flex gap-2"><span className="text-lg">📊</span><span><strong>Prevalence:</strong> Differentials sorted from common to rare.</span></p>
-                  <p className="flex gap-2"><span className="text-lg">🔬</span><span><strong>NLP Quality:</strong> BLEU & ROUGE verified outputs.</span></p>
-                  <p className="flex gap-2"><span className="text-lg">🛡️</span><span><strong>Safety:</strong> Educational decision-support only.</span></p>
+                  <p className="flex gap-3 items-start"><Target className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Vector Score:</strong> 768-D cosine similarity.</span></p>
+                  <p className="flex gap-3 items-start"><BarChart2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Prevalence:</strong> Differentials sorted from common to rare.</span></p>
+                  <p className="flex gap-3 items-start"><Microscope className="w-5 h-5 text-purple-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>NLP Quality:</strong> BLEU & ROUGE verified outputs.</span></p>
+                  <p className="flex gap-3 items-start"><ShieldAlert className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Safety:</strong> Educational decision-support only.</span></p>
                 </div>
               </div>
-              <button onClick={() => setShowTransparency(false)} className="w-full mt-8 py-3 bg-sky-600 hover:bg-sky-700 text-white rounded-xl font-bold transition-colors">
+              <button onClick={() => setShowTransparency(false)} className="w-full mt-8 py-3 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white rounded-xl font-bold transition-colors shadow-glow-sky">
                 Acknowledge
               </button>
             </motion.div>
@@ -406,36 +432,43 @@ export default function App() {
 
       {/* ── CHAT TAB ── */}
       {activeTab === 'chat' && (
-        <main className="flex-1 max-w-4xl mx-auto w-full p-4 flex flex-col justify-between">
-          <div className="space-y-5 pb-4">
+        <main className="flex-1 max-w-4xl mx-auto w-full flex flex-col min-h-0" style={{ height: 'calc(100dvh - 4.5rem)' }}>
+          
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-3 space-y-4 min-h-0">
             
             {messages.length > 0 && (
               <div className="flex justify-end">
                 <button onClick={clearChatHistory} className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-rose-600 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
-                  <Trash2 className="w-3.5 h-3.5" /> Clear History
+                  <Trash2 className="w-3.5 h-3.5" strokeWidth={2.25} /> Clear History
                 </button>
               </div>
             )}
 
             {messages.length === 0 && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-10 border border-slate-200 dark:border-slate-800 shadow-soft text-center my-4 md:my-8">
-                <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-tr from-sky-500 via-indigo-500 to-teal-500 text-white rounded-3xl flex items-center justify-center mx-auto shadow-glow-sky mb-6">
-                  <HeartPulse className="w-8 h-8 md:w-10 md:h-10" />
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl p-5 md:p-6 border border-slate-200 dark:border-slate-800 shadow-soft text-center">
+                <div className="mx-auto mb-3 flex justify-center">
+                  <PremiumIcon Icon={HeartPulse} gradient="from-sky-500 via-indigo-500 to-teal-500" size="lg" glow="sky" />
                 </div>
-                <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white mb-3 tracking-tight">Clinical Assistant</h2>
-                <p className="text-sm md:text-base text-slate-600 dark:text-slate-400 max-w-lg mx-auto mb-8">
-                  Grounded in <span className="font-bold text-sky-700 dark:text-sky-400">24,520+ medical textbook chunks</span> and <span className="font-bold text-indigo-700 dark:text-indigo-400">Live PubMed Trials</span>.
+                <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white mb-1.5 tracking-tight">Clinical Assistant</h2>
+                <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto mb-4">
+                  <span className="font-bold text-sky-700 dark:text-sky-400">24,520+ textbook chunks</span> · <span className="font-bold text-indigo-700 dark:text-indigo-400">Live PubMed</span>
                 </p>
+
+                <div className="mb-4 flex flex-col items-center gap-1">
+                  <span className="text-[11px] font-bold text-sky-600 dark:text-sky-400 animate-pulse">
+                    ↓ Type any medical question in the search bar below
+                  </span>
+                </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
                   {SUGGESTED_PROMPTS.map((p, idx) => (
-                    <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }} key={idx} onClick={() => handleSend(p.text)} 
-                      className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-start justify-between gap-3 hover:border-sky-400 dark:hover:border-sky-500 transition-colors group shadow-sm">
-                      <span className="flex items-start gap-3">
-                        <span className="text-xl shrink-0">{p.icon}</span>
-                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200 leading-snug">{p.text}</span>
+                    <motion.button whileHover={{ scale: 1.02, y: -1 }} whileTap={{ scale: 0.98 }} key={idx} onClick={() => handleSend(p.text)} 
+                      className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl flex items-start justify-between gap-2 hover:border-sky-400 dark:hover:border-sky-500 hover:shadow-md transition-all group shadow-sm">
+                      <span className="flex items-start gap-2">
+                        <span className="text-base shrink-0">{p.icon}</span>
+                        <span className="text-[11px] md:text-xs font-medium text-slate-700 dark:text-slate-200 leading-snug">{p.text}</span>
                       </span>
-                      <Send className="w-4 h-4 text-slate-400 group-hover:text-sky-500 shrink-0 mt-0.5 transition-colors" />
+                      <Send className="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-500 shrink-0 mt-0.5" strokeWidth={2.25} />
                     </motion.button>
                   ))}
                 </div>
@@ -452,15 +485,15 @@ export default function App() {
                   ) : (
                     <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 md:p-7 w-full shadow-soft space-y-5">
                       {msg.isEmergency && (
-                        <div className="bg-rose-50 dark:bg-rose-500/10 border-2 border-rose-500 dark:border-rose-500/30 rounded-2xl p-4 text-rose-800 dark:text-rose-300 text-xs md:text-sm font-bold flex items-center gap-2 shadow-sm">
-                          <AlertTriangle className="w-5 h-5 text-rose-600 animate-pulse shrink-0" />
-                          <p className="leading-relaxed whitespace-pre-line">{msg.emergencyMessage}</p>
+                        <div className="bg-rose-50 dark:bg-rose-500/10 border-2 border-rose-500 dark:border-rose-500/30 rounded-2xl p-4 text-rose-800 dark:text-rose-300 text-xs md:text-sm font-bold flex items-start gap-3 shadow-sm">
+                          <PremiumIcon Icon={AlertTriangle} gradient="from-rose-500 to-red-600" size="sm" glow="rose" />
+                          <p className="leading-relaxed whitespace-pre-line pt-1">{msg.emergencyMessage}</p>
                         </div>
                       )}
                       
                       <div className="flex flex-wrap justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3 gap-3">
-                        <div className="flex items-center gap-2.5 font-bold text-sm text-slate-900 dark:text-white">
-                          <div className="w-8 h-8 bg-gradient-to-tr from-sky-500 to-indigo-500 rounded-xl flex items-center justify-center text-white text-[10px] shadow-sm">AI</div>
+                        <div className="flex items-center gap-3 font-bold text-sm text-slate-900 dark:text-white">
+                          <PremiumIcon Icon={BrainCircuit} gradient="from-sky-500 to-indigo-600" size="sm" glow="sky" />
                           Clinical Synthesis
                         </div>
                         
@@ -468,7 +501,7 @@ export default function App() {
                           {msg.evaluation && (
                             <button onClick={() => setOpenEvalId(openEvalId === msg.id ? null : msg.id)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-[10px] md:text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
-                              <BarChart2 className="w-3.5 h-3.5" /> Score: {msg.evaluation.composite_score}/100
+                              <BarChart2 className="w-3.5 h-3.5" strokeWidth={2.5} /> Score: {msg.evaluation.composite_score}/100
                             </button>
                           )}
                           <CopyButton text={msg.text} />
@@ -509,14 +542,14 @@ export default function App() {
                       {msg.pubmedSources?.length > 0 && (
                         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
                           <div className="text-xs font-bold text-indigo-800 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <Microscope className="w-4 h-4" /> Live PubMed Citations
+                            <Microscope className="w-4 h-4" strokeWidth={2.25} /> Live PubMed Citations
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {msg.pubmedSources.map((p, i) => (
                               <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500 transition-colors group">
                                 <div className="flex justify-between items-start gap-2 mb-1.5">
                                   <strong className="text-slate-900 dark:text-white text-xs md:text-sm line-clamp-2 leading-snug group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">{p.title}</strong>
-                                  <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" />
+                                  <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2.25} />
                                 </div>
                                 <div className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{p.journal} ({p.year}) • <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">PMID: {p.pmid}</span></div>
                               </a>
@@ -532,7 +565,7 @@ export default function App() {
 
             {loading && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 max-w-sm shadow-soft flex items-center gap-4">
-                <Activity className="w-5 h-5 text-sky-500 animate-spin shrink-0" />
+                <PremiumIcon Icon={Activity} gradient="from-sky-500 to-indigo-600" size="sm" glow="sky" />
                 <div className="space-y-1 w-full">
                   <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Synthesizing response...</span>
                   <div className="h-1.5 shimmer rounded-full w-full" />
@@ -542,15 +575,45 @@ export default function App() {
             <div ref={messagesEndRef} />
           </div>
 
-          <footer className="sticky bottom-4 z-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200 dark:border-slate-700 p-2.5 rounded-2xl shadow-elevated">
-            <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2">
-              <input ref={inputRef} type="text" value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask a clinical question..." disabled={loading}
-                className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-sky-500/50 transition-all" />
-              <button type="submit" disabled={loading || !input.trim()} className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold px-6 rounded-xl shadow-soft transition-all disabled:opacity-50">
-                <Send className="w-4 h-4" />
-              </button>
-            </form>
-          </footer>
+          {/* ALWAYS-VISIBLE HIGHLIGHTED SEARCH BAR */}
+          <div className="shrink-0 px-4 pb-4 pt-1">
+            {messages.length === 0 && (
+              <p className="text-center text-[10px] md:text-xs font-bold text-sky-600 dark:text-sky-400 mb-2 flex items-center justify-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" strokeWidth={2.5} />
+                Ask anything medical — type below and press Send
+              </p>
+            )}
+            <footer
+              className={`bg-white dark:bg-slate-900 border-2 p-2.5 rounded-2xl shadow-elevated transition-all duration-500 ${
+                messages.length === 0
+                  ? 'border-sky-400 dark:border-sky-500 shadow-[0_0_0_4px_rgba(14,165,233,0.15),0_8px_30px_rgba(14,165,233,0.2)] ring-2 ring-sky-400/30 dark:ring-sky-500/40 animate-pulse'
+                  : 'border-slate-200 dark:border-slate-700'
+              }`}
+              style={messages.length === 0 ? { animationDuration: '2.5s' } : undefined}
+            >
+              <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex gap-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onFocus={(e) => e.target.parentElement?.parentElement?.classList.remove('animate-pulse')}
+                  placeholder="Type your clinical question here..."
+                  disabled={loading}
+                  autoFocus
+                  className="flex-1 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-sky-500/50 transition-all placeholder:text-slate-400 placeholder:font-medium"
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !input.trim()}
+                  className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white font-bold px-5 md:px-6 rounded-xl shadow-glow-sky transition-all disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <Send className="w-4 h-4" strokeWidth={2.5} />
+                  <span className="hidden sm:inline text-sm">Send</span>
+                </button>
+              </form>
+            </footer>
+          </div>
         </main>
       )}
 
@@ -560,31 +623,38 @@ export default function App() {
           
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="relative overflow-hidden bg-gradient-to-br from-teal-700 via-sky-800 to-indigo-900 rounded-3xl p-6 md:p-10 text-white shadow-elevated">
             <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+            <div className="absolute -bottom-16 -left-16 w-48 h-48 bg-teal-300/20 rounded-full blur-3xl" />
             <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-6">
               <div className="space-y-3 text-center md:text-left">
                 <div className="inline-flex items-center gap-1.5 bg-white/20 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-bold">
-                  <BrainCircuit className="w-4 h-4" /> Two-Brain RAG Architecture
+                  <BrainCircuit className="w-4 h-4" strokeWidth={2.5} /> Two-Brain RAG Architecture
                 </div>
-                <h2 className="text-xl md:text-3xl font-extrabold tracking-tight">Blood Test & Lab Report Analyzer</h2>
+                <h2 className="text-2xl md:text-4xl font-extrabold tracking-tight">Blood Test & Lab Report Analyzer</h2>
                 <p className="text-sky-100 text-xs md:text-sm max-w-xl">Extracts 100+ parameters, groups values by organ system, arranges differentials by prevalence, and exports PDF summaries.</p>
               </div>
-              <Dna className="w-16 h-16 text-teal-300/50 hidden md:block" />
+              <div className="hidden md:block">
+                <PremiumIcon Icon={Dna} gradient="from-white/30 to-white/10" size="xl" glow="teal" />
+              </div>
             </div>
           </motion.div>
 
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-6 md:p-8 text-center">
             <form onSubmit={handleReportUpload} className="max-w-lg mx-auto">
-              <label className="cursor-pointer block border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-8 hover:border-teal-500 dark:hover:border-teal-400 transition-colors group">
-                <TestTubes className="w-12 h-12 text-teal-500 mx-auto mb-3 group-hover:scale-110 transition-transform" />
+              <label className="cursor-pointer block border-2 border-dashed border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-8 hover:border-teal-500 dark:hover:border-teal-400 hover:bg-teal-50/30 dark:hover:bg-teal-900/10 transition-all group">
+                <div className="flex justify-center mb-4">
+                  <motion.div whileHover={{ scale: 1.1, rotate: -5 }} transition={{ type: "spring", stiffness: 300 }}>
+                    <PremiumIcon Icon={UploadCloud} gradient="from-teal-500 to-emerald-600" size="lg" glow="teal" />
+                  </motion.div>
+                </div>
                 <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">Upload Clinical PDF</h3>
                 <span className="text-xs text-slate-500">Supports CBC, Metabolic, Lipid, Renal, Thyroid profiles</span>
                 <input type="file" accept=".pdf" onChange={(e) => setReportFile(e.target.files?.[0])} className="hidden" />
               </label>
-              {reportFile && <div className="mt-4 text-sm font-bold text-teal-600 dark:text-teal-400 flex items-center justify-center gap-2"><FileCheck className="w-4 h-4" /> {reportFile.name}</div>}
-              {reportError && <div className="mt-4 text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/30 p-3 rounded-xl flex justify-center gap-2"><AlertTriangle className="w-4 h-4"/> {reportError}</div>}
+              {reportFile && <div className="mt-4 text-sm font-bold text-teal-600 dark:text-teal-400 flex items-center justify-center gap-2"><FileCheck className="w-4 h-4" strokeWidth={2.5} /> {reportFile.name}</div>}
+              {reportError && <div className="mt-4 text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/30 p-3 rounded-xl flex justify-center gap-2"><AlertTriangle className="w-4 h-4" strokeWidth={2.5} /> {reportError}</div>}
               
-              <button type="submit" disabled={!reportFile || reportLoading} className="mt-5 w-full px-8 py-3.5 bg-gradient-to-r from-teal-600 to-sky-600 text-white rounded-xl font-bold text-sm hover:shadow-glow-sky disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-                {reportLoading ? <><Activity className="w-5 h-5 animate-spin" /> Performing RAG Clinical Analysis...</> : <><Sparkles className="w-5 h-5" /> Analyze Report</>}
+              <button type="submit" disabled={!reportFile || reportLoading} className="mt-5 w-full px-8 py-3.5 bg-gradient-to-r from-teal-600 to-sky-600 hover:from-teal-700 hover:to-sky-700 text-white rounded-xl font-bold text-sm hover:shadow-glow-sky disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {reportLoading ? <><Activity className="w-5 h-5 animate-spin" strokeWidth={2.5} /> Performing RAG Clinical Analysis...</> : <><Sparkles className="w-5 h-5" strokeWidth={2.5} /> Analyze Report</>}
               </button>
             </form>
           </motion.div>
@@ -593,23 +663,25 @@ export default function App() {
             <div className="space-y-6">
               
               {reportResult.critical_alerts?.length > 0 && (
-                <div className="bg-rose-50 dark:bg-rose-900/30 border-2 border-rose-500 dark:border-rose-700 rounded-3xl p-5 text-rose-900 dark:text-rose-200 shadow-soft">
-                  <div className="flex items-center gap-2 font-bold text-base text-rose-700 dark:text-rose-400 mb-3">
-                    <AlertOctagon className="w-6 h-6 animate-pulse" /> CRITICAL LAB ALERTS
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-rose-50 dark:bg-rose-900/30 border-2 border-rose-500 dark:border-rose-700 rounded-3xl p-5 text-rose-900 dark:text-rose-200 shadow-soft">
+                  <div className="flex items-center gap-3 font-bold text-base text-rose-700 dark:text-rose-400 mb-3">
+                    <PremiumIcon Icon={AlertTriangle} gradient="from-rose-500 to-red-600" size="sm" glow="rose" />
+                    CRITICAL LAB ALERTS
                   </div>
                   <ul className="list-disc pl-6 text-sm font-semibold space-y-1.5">{reportResult.critical_alerts.map((a, i) => <li key={i}>{a}</li>)}</ul>
-                </div>
+                </motion.div>
               )}
 
-              <div className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8 space-y-5">
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8 space-y-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-                  <h3 className="font-extrabold text-lg md:text-xl text-slate-900 dark:text-white flex items-center gap-2">
-                    <CheckCircle2 className="text-teal-500 w-6 h-6" /> {reportResult.file_name}
+                  <h3 className="font-extrabold text-lg md:text-xl text-slate-900 dark:text-white flex items-center gap-3">
+                    <PremiumIcon Icon={CheckCircle2} gradient="from-emerald-500 to-teal-600" size="sm" glow="teal" />
+                    <span className="truncate">{reportResult.file_name}</span>
                   </h3>
                   <div className="flex items-center gap-3">
                     <RiskBanner risk={reportResult.risk_level} />
-                    <button onClick={() => exportClinicalPDF(reportResult)} className="bg-sky-600 hover:bg-sky-700 text-white text-xs px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm transition-colors">
-                      <Download className="w-4 h-4" /> Export PDF
+                    <button onClick={() => exportClinicalPDF(reportResult)} className="bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-glow-sky transition-all">
+                      <Download className="w-4 h-4" strokeWidth={2.5} /> Export PDF
                     </button>
                   </div>
                 </div>
@@ -621,24 +693,27 @@ export default function App() {
                     { l: 'Lab', v: reportResult.lab_name, i: Building, c: 'text-purple-600' },
                     { l: 'Date', v: reportResult.report_date, i: Calendar, c: 'text-emerald-600' }
                   ].map((x, i) => (
-                    <div key={i}><span className="text-slate-400 text-[10px] font-bold uppercase block mb-1">{x.l}</span><strong className="text-slate-900 dark:text-white flex items-center gap-1.5 truncate"><x.i className={`w-4 h-4 ${x.c}`} />{x.v}</strong></div>
+                    <div key={i}><span className="text-slate-400 text-[10px] font-bold uppercase block mb-1">{x.l}</span><strong className="text-slate-900 dark:text-white flex items-center gap-1.5 truncate"><x.i className={`w-4 h-4 ${x.c}`} strokeWidth={2.5} />{x.v}</strong></div>
                   ))}
                 </div>
 
                 {reportResult.summary && (
                   <div className="bg-sky-50 dark:bg-sky-900/20 border border-sky-100 dark:border-sky-800/50 rounded-2xl p-5">
                     <div className="text-xs font-bold text-sky-800 dark:text-sky-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      <ClipboardList className="w-4 h-4" /> Executive Summary
+                      <ClipboardList className="w-4 h-4" strokeWidth={2.5} /> Executive Summary
                     </div>
                     <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-medium">{reportResult.summary}</p>
                   </div>
                 )}
-              </div>
+              </motion.div>
 
               {reportResult.lab_values?.length > 0 && (
-                <div className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-[#131a2c] rounded-3xl border border-slate-200 dark:border-slate-800 shadow-soft p-5 md:p-8">
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4 mb-5">
-                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-2"><TestTubes className="w-5 h-5 text-teal-500" /> Extracted Parameters</h4>
+                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-3">
+                      <PremiumIcon Icon={TestTubes} gradient="from-teal-500 to-cyan-600" size="sm" glow="teal" />
+                      Extracted Parameters
+                    </h4>
                     <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0">
                       {['ALL', 'HIGH', 'LOW', 'NORMAL'].map(f => (
                         <button key={f} onClick={() => setLabFilter(f)} className={`px-4 py-1.5 text-xs font-bold rounded-xl border transition-colors ${labFilter === f ? 'bg-teal-600 text-white border-teal-600 shadow-sm' : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'}`}>{f}</button>
@@ -648,94 +723,103 @@ export default function App() {
 
                   <div className="space-y-6">
                     {Object.entries(groupedLabs).map(([sys, labs], sIdx) => (
-                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: sIdx * 0.1 }} key={sys} className="space-y-3">
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: sIdx * 0.08 }} key={sys} className="space-y-3">
                         <h5 className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-900/30 border border-teal-200 dark:border-teal-800/50 px-3 py-1.5 rounded-xl inline-flex items-center gap-1.5">
-                          <Layers className="w-4 h-4 text-teal-600 dark:text-teal-400" /> {sys} ({labs.length})
+                          <Layers className="w-4 h-4 text-teal-600 dark:text-teal-400" strokeWidth={2.5} /> {sys} ({labs.length})
                         </h5>
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                           {labs.map((lab, i) => {
                             const st = (lab.status || "").toUpperCase();
                             const bClass = st === "HIGH" ? "border-rose-200 bg-rose-50/50 dark:border-rose-800/50 dark:bg-rose-900/10" : st === "LOW" ? "border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-900/10" : st === "NORMAL" ? "border-emerald-200 bg-emerald-50/30 dark:border-emerald-800/50 dark:bg-emerald-900/10" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/50";
                             return (
-                              <div key={i} className={`p-4 rounded-2xl border ${bClass} shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all`}>
+                              <motion.div whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300 }} key={i} className={`p-4 rounded-2xl border ${bClass} shadow-sm hover:shadow-md transition-all`}>
                                 <div className="flex justify-between items-start mb-2">
                                   <span className="text-xs font-bold text-slate-800 dark:text-slate-200 pr-2 leading-tight">{lab.test}</span>
                                   <StatusBadge status={st} />
                                 </div>
                                 <div className="text-xl font-extrabold text-slate-900 dark:text-white">{lab.result} <span className="text-[10px] font-medium text-slate-500">{lab.unit}</span></div>
                                 <div className="text-[10px] text-slate-500 mt-1">Ref: {lab.reference_range}</div>
-                              </div>
+                              </motion.div>
                             );
                           })}
                         </div>
                       </motion.div>
                     ))}
                   </div>
-                </div>
+                </motion.div>
               )}
 
               {reportResult.differential_considerations?.length > 0 && (
-                <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 md:p-8 shadow-soft">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 md:p-8 shadow-soft">
                   <div className="border-b border-slate-100 dark:border-slate-800 pb-3 mb-5">
-                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-2"><Target className="w-5 h-5 text-indigo-500" /> Differential Considerations</h4>
-                    <p className="text-xs text-slate-500 mt-1">Ranked from highest epidemiological likelihood to rare atypical patterns.</p>
+                    <h4 className="font-bold text-base md:text-lg text-slate-900 dark:text-white flex items-center gap-3">
+                      <PremiumIcon Icon={Target} gradient="from-indigo-500 to-purple-600" size="sm" glow="indigo" />
+                      Differential Considerations
+                    </h4>
+                    <p className="text-xs text-slate-500 mt-2 ml-11">Ranked from highest epidemiological likelihood to rare atypical patterns.</p>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {reportResult.differential_considerations.map((diff, idx) => (
-                      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: idx * 0.1 }} key={idx} 
-                        className="p-5 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 transition-colors">
+                      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: idx * 0.1 }} whileHover={{ y: -3 }} key={idx} 
+                        className="p-5 bg-gradient-to-br from-slate-50 to-white dark:from-slate-800 dark:to-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 hover:shadow-md transition-all">
                         <div className="flex justify-between items-start mb-3 gap-2">
                           <strong className="text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs">{idx+1}</span>
+                            <span className="w-7 h-7 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center text-xs font-extrabold shadow-sm">{idx+1}</span>
                             {diff.title}
                           </strong>
                           <PrevalenceBadge prevalence={diff.prevalence} />
                         </div>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed pl-8">{diff.rationale}</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed pl-9">{diff.rationale}</p>
                       </motion.div>
                     ))}
                   </div>
-                </div>
+                </motion.div>
               )}
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {reportResult.pathophysiology && (
-                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft">
-                    <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-3 flex items-center gap-2"><Brain className="w-4 h-4 text-indigo-500"/> Pathophysiology</h4>
+                  <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white mb-3 flex items-center gap-3">
+                      <PremiumIcon Icon={Brain} gradient="from-indigo-500 to-purple-600" size="sm" glow="indigo" />
+                      Pathophysiology
+                    </h4>
                     <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">{reportResult.pathophysiology}</p>
-                  </div>
+                  </motion.div>
                 )}
 
                 {reportResult.recommendations && (
-                  <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft space-y-4">
-                    <h4 className="font-bold text-sm text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-2"><ClipboardList className="w-4 h-4 text-teal-500"/> Action Plan</h4>
+                  <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-soft space-y-4">
+                    <h4 className="font-bold text-sm text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-2 flex items-center gap-3">
+                      <PremiumIcon Icon={ClipboardList} gradient="from-teal-500 to-emerald-600" size="sm" glow="teal" />
+                      Action Plan
+                    </h4>
                     <div className="space-y-3 text-xs">
                       {reportResult.recommendations.urgent_actions?.length > 0 && (
                         <div className="bg-rose-50 dark:bg-rose-900/20 p-4 rounded-2xl border border-rose-200 dark:border-rose-800/50">
-                          <strong className="text-rose-800 dark:text-rose-300 flex items-center gap-1.5 mb-2"><AlertTriangle className="w-4 h-4 text-rose-500" /> Urgent Actions</strong>
+                          <strong className="text-rose-800 dark:text-rose-300 flex items-center gap-1.5 mb-2"><AlertTriangle className="w-4 h-4 text-rose-500" strokeWidth={2.5} /> Urgent Actions</strong>
                           <ul className="list-disc pl-5 text-rose-900 dark:text-rose-200 space-y-1">{reportResult.recommendations.urgent_actions.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.further_tests?.length > 0 && (
                         <div className="bg-sky-50 dark:bg-sky-900/20 p-4 rounded-2xl border border-sky-200 dark:border-sky-800/50">
-                          <strong className="text-sky-800 dark:text-sky-300 flex items-center gap-1.5 mb-2"><TestTube className="w-4 h-4 text-sky-500" /> Further Tests</strong>
+                          <strong className="text-sky-800 dark:text-sky-300 flex items-center gap-1.5 mb-2"><TestTube className="w-4 h-4 text-sky-500" strokeWidth={2.5} /> Further Tests</strong>
                           <ul className="list-disc pl-5 text-sky-900 dark:text-sky-200 space-y-1">{reportResult.recommendations.further_tests.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.specialty_consultation?.length > 0 && (
                         <div className="bg-indigo-50 dark:bg-indigo-900/20 p-4 rounded-2xl border border-indigo-200 dark:border-indigo-800/50">
-                          <strong className="text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5 mb-2"><UserPlus className="w-4 h-4 text-indigo-500" /> Specialist Consultations</strong>
+                          <strong className="text-indigo-800 dark:text-indigo-300 flex items-center gap-1.5 mb-2"><UserPlus className="w-4 h-4 text-indigo-500" strokeWidth={2.5} /> Specialist Consultations</strong>
                           <ul className="list-disc pl-5 text-indigo-900 dark:text-indigo-200 space-y-1">{reportResult.recommendations.specialty_consultation.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                       {reportResult.recommendations.lifestyle_modifications?.length > 0 && (
                         <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50">
-                          <strong className="text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-2"><Leaf className="w-4 h-4 text-emerald-500" /> Lifestyle</strong>
+                          <strong className="text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-2"><Leaf className="w-4 h-4 text-emerald-500" strokeWidth={2.5} /> Lifestyle</strong>
                           <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.recommendations.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 )}
               </div>
             </div>
