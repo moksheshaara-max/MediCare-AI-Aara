@@ -12,3 +12,5 @@ nltk
 rouge-score
 gunicorn
 huggingface_hub
+pytesseract
+Pillow
