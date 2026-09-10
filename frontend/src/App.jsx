@@ -10,7 +10,7 @@ import {
   X, Trash2, Download, Filter, UserPlus, Leaf, TestTube, 
   TestTubes, User, Calendar, Building, ChevronDown, ChevronUp, 
   BarChart2, Layers, GitBranch, Moon, Sun, Copy, Check, RotateCcw, 
-  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target
+  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target, Zap
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://medicare-ai-aara-backend.onrender.com";
@@ -36,6 +36,9 @@ const SUGGESTED_PROMPTS = [
   { icon: '🚨', text: "I have severe crushing chest pain radiating to the jaw with shortness of breath." },
 ];
 
+/* ═══════════════════════════════════════════
+   PREMIUM ICON CONTAINER
+   ═══════════════════════════════════════════ */
 function PremiumIcon({ Icon, gradient = "from-sky-500 to-indigo-600", size = "lg", glow = "sky" }) {
   const sizes = {
     sm: "w-8 h-8 rounded-lg",
@@ -184,6 +187,7 @@ const exportClinicalPDF = async (reportData) => {
   }
 };
 
+/* ── MAIN APP ── */
 export default function App() {
   const [activeTab, setActiveTab] = useState('chat');
   const [darkMode, setDarkMode] = useState(() => {
@@ -208,6 +212,7 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [reportResult, setReportResult] = useState(null);
   const [reportError, setReportError] = useState('');
+  const [dragActive, setDragActive] = useState(false);
   const [labFilter, setLabFilter] = useState('ALL');
 
   const [serverHealth, setServerHealth] = useState({ online: false, chunks: 0, docs: 0 });
@@ -291,9 +296,9 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/api/analyze-report`, { method: 'POST', body: formData });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to analyze report.');
+      if (!response.ok) throw new Error(data.error);
       setReportResult(data);
-    } catch (err) { setReportError(err.message || "Analysis failed."); }
+    } catch (err) { setReportError("Analysis failed. Please check the PDF."); }
     finally { setReportLoading(false); }
   };
 
@@ -328,6 +333,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Auto-focus the input when the chat tab opens with no messages
   useEffect(() => {
     if (activeTab === 'chat' && messages.length === 0) {
       const t = setTimeout(() => inputRef.current?.focus(), 300);
@@ -338,7 +344,7 @@ export default function App() {
   return (
     <div className="flex flex-col min-h-screen relative overflow-x-hidden transition-colors">
       
-      {/* Decorative Orbs */}
+      {/* Decorative Background Orbs */}
       <div aria-hidden className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
         <div className="absolute -top-32 -right-32 w-96 h-96 bg-gradient-to-br from-sky-200/40 to-indigo-200/30 dark:from-sky-900/30 dark:to-indigo-900/20 rounded-full blur-3xl" />
         <div className="absolute top-1/2 -left-32 w-96 h-96 bg-gradient-to-br from-teal-200/30 to-emerald-200/20 dark:from-teal-900/30 dark:to-emerald-900/20 rounded-full blur-3xl" />
@@ -350,7 +356,7 @@ export default function App() {
           
           <div className="flex items-center justify-between w-full md:w-auto">
             <div className="flex items-center gap-3">
-              <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2 rounded-xl shadow-glow-sky shrink-0">
+              <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2.5 rounded-xl shadow-glow-sky shrink-0">
                 <Stethoscope className="w-5 h-5 md:w-6 md:h-6" strokeWidth={2.5} />
               </motion.div>
               <div>
@@ -362,7 +368,6 @@ export default function App() {
               </div>
             </div>
             
-            {/* Mobile Actions */}
             <div className="flex md:hidden items-center gap-1.5">
               <button onClick={() => setShowTransparency(true)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                 <Info className="w-4 h-4" strokeWidth={2.25} />
@@ -373,8 +378,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
+          <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1.5 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
             <button onClick={() => setActiveTab('chat')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'chat' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
               <MessageCircle className="w-4 h-4" strokeWidth={2.25} /> Clinical Assistant
             </button>
@@ -383,7 +387,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-2.5">
             <button onClick={() => setShowTransparency(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
               <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" strokeWidth={2.25} /> Transparency
@@ -499,7 +502,6 @@ export default function App() {
                             <button onClick={() => setOpenEvalId(openEvalId === msg.id ? null : msg.id)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-[10px] md:text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
                               <BarChart2 className="w-3.5 h-3.5" strokeWidth={2.5} /> Score: {msg.evaluation.composite_score}/100
-                              {openEvalId === msg.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           )}
                           <CopyButton text={msg.text} />
@@ -648,7 +650,6 @@ export default function App() {
                 <span className="text-xs text-slate-500">Supports CBC, Metabolic, Lipid, Renal, Thyroid profiles</span>
                 <input type="file" accept=".pdf" onChange={(e) => setReportFile(e.target.files?.[0])} className="hidden" />
               </label>
-              
               {reportFile && <div className="mt-4 text-sm font-bold text-teal-600 dark:text-teal-400 flex items-center justify-center gap-2"><FileCheck className="w-4 h-4" strokeWidth={2.5} /> {reportFile.name}</div>}
               {reportError && <div className="mt-4 text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/30 p-3 rounded-xl flex justify-center gap-2"><AlertTriangle className="w-4 h-4" strokeWidth={2.5} /> {reportError}</div>}
               
@@ -811,10 +812,10 @@ export default function App() {
                           <ul className="list-disc pl-5 text-indigo-900 dark:text-indigo-200 space-y-1">{reportResult.recommendations.specialty_consultation.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
-                      {reportResult.lifestyle_modifications?.length > 0 && (
+                      {reportResult.recommendations.lifestyle_modifications?.length > 0 && (
                         <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50">
                           <strong className="text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-2"><Leaf className="w-4 h-4 text-emerald-500" strokeWidth={2.5} /> Lifestyle</strong>
-                          <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                          <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.recommendations.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                     </div>
