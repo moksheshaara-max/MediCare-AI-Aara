@@ -1,7 +1,7 @@
 """
 MediCare AI - Hybrid Clinical Answer Generation Module
-Combines MongoDB Vector Search + NIH PubMed API.
-Features visual Mermaid.js clinical flowcharts and fast Gemini generation.
+Combines MongoDB Vector Search (Textbooks & Guidelines) + NIH PubMed API.
+Features visual Mermaid.js decision trees and stable gemini-flash-lite-latest generation.
 """
 
 import sys
@@ -35,7 +35,7 @@ LOW_CONFIDENCE_SCORE = 0.60
 _response_cache = {}
 
 
-def clean_latex_symbols(text):
+def clean_latex_symbols(text: str) -> str:
     if not text:
         return ""
     text = re.sub(r'\\ge\b', '≥', text)
@@ -52,56 +52,57 @@ def clean_latex_symbols(text):
     return text
 
 
-BOOK_MODE_PROMPT = """You are MediCare AI, an authoritative clinical knowledge assistant for physicians and medical students.
+BOOK_MODE_PROMPT = """You are MediCare AI, a senior clinical consultant decision-support assistant for physicians and medical students.
 
-Synthesize the provided Medical Textbooks, Guidelines, and PubMed papers into an authoritative clinical response.
+Synthesize the provided Medical Textbooks, Guidelines, and PubMed papers into an authoritative, highly structured clinical answer.
 
-MANDATORY STRUCTURE:
+MANDATORY CLINICAL STRUCTURE:
 
-1. **Clinical Overview & Key Concepts**
-   - Concise summary of condition and pathophysiology.
+1. **🩺 Clinical Overview & Key Concepts**
+   - Detailed summary of condition, pathophysiology, and underlying disease mechanisms.
 
-2. **Step-by-Step Clinical Decision Flow (Visual Flowchart)**
-   - You MUST generate a visual Mermaid flowchart diagram illustrating the clinical diagnostic, triage, or management algorithm.
-   - Start the diagram on a new line with mermaid code block syntax:
-     graph TD
-         A["Patient Presentation"] --> B{"Diagnostic Triage"}
-         B -->|"High Risk"| C["Immediate Intervention"]
-         B -->|"Stable"| D["Stepwise Workup"]
-         D --> E["First-Line Therapy"]
-         E --> F["Monitoring"]
-   - ALWAYS wrap node text in double quotes: A["Text Here"]
-   - Keep node labels short (under 6 words).
+2. **🧭 Step-by-Step Clinical Decision Flow (Visual Flowchart)**
+   - You MUST generate a visual Mermaid flowchart diagram illustrating the clinical diagnostic or triage algorithm.
+   - Start the diagram on a new line with mermaid syntax:
+   ```mermaid
+   graph TD
+       A["Patient Presentation"] --> B{"Diagnostic Triage"}
+       B -->|"High Risk / Acute"| C["Immediate Intervention"]
+       B -->|"Stable / Low Risk"| D["Stepwise Workup"]
+       D --> E["First-Line Therapy"]
+       E --> F["Monitoring & Reassessment"]
+   ```
+   - Rules: Wrap node labels in double quotes. Keep text concise inside boxes.
 
-3. **Diagnostic Workup & Key Criteria**
-   - Gold standard tests, specific cutoff values (e.g. HbA1c >= 6.5%), and physical findings.
+3. **🔬 Diagnostic Criteria & Laboratory Workup**
+   - Gold standard tests, specific cutoff values (e.g. HbA1c ≥ 6.5%, eGFR < 60 mL/min), and physical findings.
 
-4. **Evidence-Based Management Protocol**
-   - First-Line Therapy: Standard primary drugs, dosages, mechanism.
-   - Second-Line / Escalation: Alternative drugs if first-line fails.
-   - Lifestyle Modifications: Dietary and monitoring measures.
+4. **💊 Evidence-Based Management Protocol**
+   - **First-Line Therapy:** Primary medication/intervention, standard dosing guidelines, mechanism.
+   - **Second-Line / Escalation:** Alternative therapies if first-line fails or is contraindicated.
+   - **Non-Pharmacological / Lifestyle:** Dietary, monitoring, or procedural measures.
 
-5. **Recent Clinical Evidence** (Include when PubMed papers are in context)
-   - Synthesize trial evidence with PMIDs.
+5. **📚 Recent Clinical Evidence** (Include when PubMed papers are in context)
+   - Synthesize recent trial evidence and updated international consensus with PMIDs.
 
-6. **Clinical Red Flags**
-   - Warning signs requiring emergency referral.
+6. **⚠️ Clinical Red Flags & Complications**
+   - Warning signs requiring immediate emergency escalation.
 
-RULES:
-- Ground answers strictly in provided context.
-- Use plain Unicode (>=, <=, +/-, mg/dL). No LaTeX.
-- End with a 1-sentence medical disclaimer.
+FORMATTING RULES:
+1. Ground statements strictly in provided medical context. Do NOT fabricate facts.
+2. Use plain Unicode (≥, ≤, ±, →, mg/dL, mmHg). Never use LaTeX notation.
+3. End with a 1-sentence standard clinical disclaimer.
 """
 
-FALLBACK_MODE_PROMPT = """You are MediCare AI, a medical decision-support assistant.
+FALLBACK_MODE_PROMPT = """You are MediCare AI, a clinical decision-support assistant.
 The question was not found in our indexed textbook database.
 Answer using general medical knowledge with extreme caution and transparency.
 
 CRITICAL RULES:
-1. START WITH: "Clinical Note: This summary is from general medical knowledge (not directly indexed in current textbook chunks)."
-2. Include a visual mermaid flowchart diagram for the general management pathway.
-3. Structure clearly: Overview, Flowchart, Management, Red Flags.
-4. Use plain Unicode and NO LaTeX.
+1. START WITH: "ℹ️ **Clinical Note:** *This overview is synthesized from general medical knowledge (not directly indexed in current textbook chunks).*"
+2. Include a visual ```mermaid flowchart diagram for the management pathway.
+3. Structure clearly: Overview, Flowchart, Diagnostic Criteria, Management, Red Flags.
+4. Use plain Unicode (≥, ≤) and NO LaTeX.
 5. End with a reminder to consult a licensed healthcare provider.
 """
 
@@ -132,13 +133,13 @@ def build_hybrid_prompt(question, text_chunks, pubmed_papers, chat_history=None)
         if history_parts:
             history_text = "\n=== PREVIOUS CONVERSATION CONTEXT ===\n" + "\n".join(history_parts) + "\n\n"
     
-    return f"""{history_text}PROVIDED CLINICAL CONTEXT:
+    return f"""{history_text}PROVIDED CLINICAL KNOWLEDGE BASE:
 {full_context}
 
 ---
-USER QUESTION: {question}
+CLINICAL QUERY: {question}
 
-Generate a comprehensive clinical response with an interactive Mermaid flowchart diagram."""
+Generate a comprehensive, structured clinical response with a decision pathway algorithm."""
 
 
 def determine_mode(chunks, papers):
@@ -163,13 +164,13 @@ def determine_mode(chunks, papers):
     return mode, max_score
 
 
-def generate_answer(question, chunks, max_retries=3, chat_history=None):
+def generate_answer(question: str, chunks: list, max_retries: int = 3, chat_history: list = None):
     cache_key = question.lower().strip()
     if cache_key in _response_cache and not chat_history:
-        print("    Mode: CACHED (Instant)")
+        print("    Mode: CACHED (Instant response)")
         return _response_cache[cache_key]
     
-    print("    Searching NIH PubMed...")
+    print("    Searching NIH PubMed for relevant peer-reviewed trials...")
     pubmed_papers = search_pubmed_live(question, max_results=5)
     
     mode, max_score = determine_mode(chunks, pubmed_papers)
@@ -181,10 +182,10 @@ def generate_answer(question, chunks, max_retries=3, chat_history=None):
     else:
         accuracy_percentage = 0.0
         
-    print(f"    Mode: {mode.upper()} | Similarity: {accuracy_percentage}% | Chunks: {len(chunks)} | PubMed: {len(pubmed_papers)}")
+    print(f"    Mode: {mode.upper()} | Similarity: {accuracy_percentage}% ({len(chunks)} chunks, {len(pubmed_papers)} papers)")
     
     if mode == "fallback":
-        prompt = f"CLINICAL QUERY: {question}\nProvide a structured overview with a visual Mermaid flowchart diagram."
+        prompt = f"CLINICAL QUERY: {question}\nProvide a structured evidence-based clinical overview with step-by-step management."
         system_prompt = FALLBACK_MODE_PROMPT
     else:
         prompt = build_hybrid_prompt(question, chunks, pubmed_papers, chat_history)
@@ -203,13 +204,14 @@ def generate_answer(question, chunks, max_retries=3, chat_history=None):
                 )
             )
             
-            answer = clean_latex_symbols(response.text or "")
+            raw_text = response.text or ""
+            answer = clean_latex_symbols(raw_text)
             
             mode_labels = {
-                "books_and_research": "[Grounded in Medical Textbooks, Standard Guidelines & NIH PubMed Research]",
-                "books": "[Grounded in Medical Textbooks & Standard Clinical Guidelines]",
-                "research": "[Grounded in Live NIH PubMed Clinical Research Papers]",
-                "fallback": "[General Clinical Knowledge — Not explicitly indexed in textbook chunks]"
+                "books_and_research": "📚🔬 [Grounded in Medical Textbooks, Standard Guidelines & NIH PubMed Research]",
+                "books": "📚 [Grounded in Medical Textbooks & Standard Clinical Guidelines]",
+                "research": "🔬 [Grounded in Live NIH PubMed Clinical Research Papers]",
+                "fallback": "🤖 [General Clinical Knowledge — Not explicitly indexed in textbook chunks]"
             }
             
             labeled_answer = f"{mode_labels.get(mode, '')}\n\n{answer}"
@@ -221,14 +223,14 @@ def generate_answer(question, chunks, max_retries=3, chat_history=None):
             return result
             
         except Exception as e:
-            print(f"    Generation attempt {attempt + 1} failed: {e}")
+            print(f"    Generation attempt {attempt + 1} notice: {e}")
             time.sleep(2)
             continue
     
-    return "Failed to generate response. Please verify server status.", "error", 0.0, []
+    return "Failed to generate response. Please try again.", "error", 0.0, []
 
 
-def format_sources(chunks, mode, pubmed_papers=None):
+def format_sources(chunks: list, mode: str, pubmed_papers: list = None):
     if mode == "fallback":
         return [], []
     

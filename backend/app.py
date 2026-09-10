@@ -1,7 +1,7 @@
 """
 MediCare AI - Backend REST API (Flask)
-Exposes RAG Pipeline + PubMed Live Search + Hybrid Report Analyzer (PyMuPDF + Tesseract).
-Uses ONLY gemini-flash-lite-latest for LLM text reasoning.
+Exposes RAG Pipeline + PubMed Live Search + Two-Step Lab Report Analyzer (PyMuPDF + RAG).
+Uses gemini-flash-lite-latest ONLY.
 """
 
 import sys
@@ -10,7 +10,7 @@ import io
 import re
 import json
 import time
-import traceback
+import pymupdf
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -31,7 +31,6 @@ from retrieval.search import (
 from generation.generator import generate_answer, format_sources, clean_latex_symbols, client, GENERATION_MODEL
 from database.mongo_store import get_stats
 from evaluator.rag_evaluator import evaluate_response_quality
-from ocr_utils import extract_document_text, TESSERACT_AVAILABLE
 from google.genai import types
 
 app = Flask(__name__)
@@ -56,6 +55,22 @@ def get_book_display_name(filename):
     if filename in BOOK_TITLES:
         return BOOK_TITLES[filename]
     return filename.replace(".pdf", "").replace("_", " ").title()
+
+
+def extract_text_from_pdf_stream(pdf_bytes):
+    try:
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        extracted_text = []
+        for page_num in range(doc.page_count):
+            page = doc.load_page(page_num)
+            text = page.get_text()
+            if text:
+                extracted_text.append(text)
+        doc.close()
+        return "\n".join(extracted_text).strip()
+    except Exception as e:
+        print(f"PDF Extraction Error: {e}")
+        return ""
 
 
 def parse_json_safely(text):
@@ -89,29 +104,6 @@ def parse_json_safely(text):
     return None
 
 
-def call_gemini_text_json(system_prompt: str, user_prompt: str, temperature: float = 0.0, max_tokens: int = 8192):
-    """Call ONLY gemini-flash-lite-latest with text inputs returning JSON."""
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=GENERATION_MODEL,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    temperature=temperature,
-                    max_output_tokens=max_tokens,
-                    response_mime_type="application/json",
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
-                )
-            )
-            if response and response.text:
-                return response.text
-        except Exception as e:
-            print(f"  Gemini call attempt {attempt + 1} failed: {e}")
-            time.sleep(2)
-    return None
-
-
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"project": "MediCare AI SaaS API", "status": "Online", "model": GENERATION_MODEL})
@@ -126,7 +118,6 @@ def health():
             "database": "connected",
             "total_chunks_indexed": stats["total_chunks"],
             "total_documents": len(stats["by_book"]),
-            "tesseract_available": TESSERACT_AVAILABLE,
             "generation_model": GENERATION_MODEL
         })
     except Exception as e:
@@ -182,63 +173,71 @@ def ask():
         return jsonify({"error": "An internal server error occurred.", "details": str(e)}), 500
 
 
-# ── HYBRID REPORT ANALYZER (PyMuPDF + Tesseract OCR + gemini-flash-lite-latest) ──
 @app.route("/api/analyze-report", methods=["POST"])
 def analyze_report():
+    """
+    Two-Step RAG Lab Report Analyzer:
+    Step 1: Exhaustive Data Extraction (PyMuPDF -> Gemini Text JSON)
+    Step 2: RAG Search + Clinical Reasoning (Prevalence Ordered)
+    """
     try:
         if 'file' not in request.files:
             return jsonify({"error": "No file uploaded."}), 400
 
         file = request.files['file']
-        filename = (file.filename or "file.pdf").lower()
-        
-        # Valid File Format Check
-        allowed_extensions = ('.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff')
-        if not filename.endswith(allowed_extensions):
-            return jsonify({"error": "Please select a valid PDF or Image file (PNG, JPG, WEBP)."}), 400
+        if file.filename == '' or not file.filename.lower().endswith('.pdf'):
+            return jsonify({"error": "Please select a valid PDF file."}), 400
 
-        file_bytes = file.read()
-        if not file_bytes:
-            return jsonify({"error": "Uploaded file is empty."}), 400
+        pdf_bytes = file.read()
+        pdf_text = extract_text_from_pdf_stream(pdf_bytes)
 
-        print(f"\n[Report Analyzer] Received: {file.filename} ({len(file_bytes)} bytes)")
+        if not pdf_text or len(pdf_text) < 30:
+            return jsonify({"error": "Could not extract readable text from this PDF."}), 400
 
-        # STEP 0: TEXT EXTRACTION (PyMuPDF or Tesseract OCR)
-        try:
-            extracted_text, method = extract_document_text(file_bytes, file.filename)
-        except Exception as ocr_err:
-            print(f"  OCR Extraction Failed: {ocr_err}")
-            return jsonify({"error": f"Failed to extract text from file: {str(ocr_err)}. Ensure Tesseract OCR is installed if uploading images/scans."}), 400
+        print(f"\n[Report Analyzer] Analyzing: {file.filename} ({len(pdf_text)} characters)")
 
-        if not extracted_text or len(extracted_text.strip()) < 15:
-            return jsonify({"error": "Could not extract readable text from this file. Please check file quality."}), 400
+        # STEP 1: EXHAUSTIVE DATA EXTRACTION
+        print("  Step 1: Extracting all lab parameters...")
+        extract_sys_prompt = """You are a highly precise medical laboratory data entry AI.
+Your ONLY job is to extract EVERY SINGLE lab test from the report text.
+DO NOT summarize. DO NOT skip any rows. Extract all tests present.
+Categorize system accurately (Hematology, Renal, Metabolic, Liver, Cardiac, Electrolytes, Urine, Thyroid, Lipid, Coagulation).
 
-        print(f"  ✓ Text Extraction Complete (Method: {method}, Chars: {len(extracted_text)})")
-
-        # STEP 1: EXHAUSTIVE DATA EXTRACTION (gemini-flash-lite-latest ONLY)
-        print("  Step 1: Extracting lab parameters using gemini-flash-lite-latest...")
-        extract_sys_prompt = """You are a precise medical laboratory data entry AI.
-Extract EVERY lab parameter from the text. Categorize system (Hematology, Renal, Metabolic, Liver, Cardiac, Electrolytes, Urine, Thyroid, Lipid, Coagulation).
-RETURN ONLY A JSON ARRAY OF OBJECTS:
+RETURN ONLY A JSON ARRAY OF OBJECTS LIKE THIS:
 [
   {"system": "Hematology", "test": "Hemoglobin", "result": "8.2", "unit": "g/dL", "ref": "12.0 - 15.0", "status": "LOW"}
 ]
 """
-        raw_extraction = call_gemini_text_json(
-            system_prompt=extract_sys_prompt,
-            user_prompt=f"EXTRACT ALL LAB PARAMETERS FROM THIS REPORT TEXT:\n\n{extracted_text[:15000]}",
-            temperature=0.0,
-            max_tokens=8192
-        )
+        extracted_labs = []
+        for attempt in range(3):
+            try:
+                extract_response = client.models.generate_content(
+                    model=GENERATION_MODEL,
+                    contents=f"EXTRACT ALL LAB PARAMETERS FROM THIS REPORT TEXT:\n\n{pdf_text[:15000]}",
+                    config=types.GenerateContentConfig(
+                        system_instruction=extract_sys_prompt,
+                        temperature=0.0,
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                    )
+                )
+                if extract_response and extract_response.text:
+                    parsed = parse_json_safely(extract_response.text)
+                    if isinstance(parsed, list):
+                        extracted_labs = parsed
+                        break
+            except Exception as e:
+                print(f"  Step 1 attempt {attempt + 1} notice: {e}")
+                time.sleep(2)
 
-        extracted_labs = parse_json_safely(raw_extraction)
         if not isinstance(extracted_labs, list):
             extracted_labs = []
 
         print(f"  ✓ Step 1 Complete: Extracted {len(extracted_labs)} lab parameters.")
 
-        # STEP 2: CLINICAL REASONING (RAG + gemini-flash-lite-latest ONLY)
-        print("  Step 2: Performing RAG & Clinical Reasoning...")
+        # STEP 2: CLINICAL REASONING (RAG)
+        print("  Step 2: Performing Clinical Reasoning with RAG...")
         abnormal_labs = [l for l in extracted_labs if isinstance(l, dict) and l.get("status") in ["HIGH", "LOW"]]
         search_query = ", ".join([f"{l.get('test')} {l.get('status')}" for l in abnormal_labs[:10]])
         if not search_query:
@@ -247,8 +246,8 @@ RETURN ONLY A JSON ARRAY OF OBJECTS:
         chunks = search_medical_chunks(search_query, top_k=15)
         tb_context = "\n---\n".join([f"[Source {i}: {c['book']}, Page {c['page']}]\n{c['text']}" for i, c in enumerate(chunks, 1)])
 
-        reasoning_sys_prompt = """You are MediCare AI, a senior consultant pathologist.
-Analyze the lab data and return a JSON object:
+        reasoning_sys_prompt = """You are MediCare AI, a senior consultant pathologist and physician.
+Analyze the patient lab data and return a JSON object:
 
 {
   "patient_name": "Name or Not Specified",
@@ -257,8 +256,8 @@ Analyze the lab data and return a JSON object:
   "lab_name": "Diagnostic Lab Name",
   "risk_level": "HIGH",
   "critical_alerts": ["Alert 1"],
-  "summary": "Clinical summary",
-  "pathophysiology": "Detailed pathophysiology",
+  "summary": "Clinical executive summary...",
+  "pathophysiology": "Detailed inter-organ pathophysiological connection assessment...",
   "differential_considerations": [
     {"prevalence": "COMMON", "title": "Condition", "rationale": "Reason"},
     {"prevalence": "LESS COMMON", "title": "Condition", "rationale": "Reason"},
@@ -273,7 +272,7 @@ Analyze the lab data and return a JSON object:
 }
 
 RULES:
-1. ORDER DIFFERENTIALS BY PREVALENCE: COMMON first, LESS COMMON middle, RARE last.
+1. ORDER DIFFERENTIALS STRICTLY BY EPIDEMIOLOGICAL PREVALENCE: COMMON first, LESS COMMON middle, RARE last.
 2. risk_level MUST be LOW, MODERATE, or HIGH.
 3. Use plain Unicode (≥, ≤, %). NO LaTeX.
 """
@@ -281,21 +280,34 @@ RULES:
 {tb_context}
 ---
 RAW REPORT TEXT (Metadata & Content):
-{extracted_text[:3000]}
+{pdf_text[:3000]}
 ---
 EXTRACTED LAB VALUES:
 {json.dumps(extracted_labs[:100])}
 ---
 Output the Clinical JSON Object with Differentials sorted by Prevalence."""
 
-        raw_reasoning = call_gemini_text_json(
-            system_prompt=reasoning_sys_prompt,
-            user_prompt=user_prompt,
-            temperature=0.1,
-            max_tokens=4096
-        )
-
-        parsed = parse_json_safely(raw_reasoning) or {}
+        parsed = {}
+        for attempt in range(3):
+            try:
+                reason_response = client.models.generate_content(
+                    model=GENERATION_MODEL,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=reasoning_sys_prompt,
+                        temperature=0.1,
+                        max_output_tokens=4096,
+                        response_mime_type="application/json",
+                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                    )
+                )
+                if reason_response and reason_response.text:
+                    parsed = parse_json_safely(reason_response.text) or {}
+                    if parsed:
+                        break
+            except Exception as e:
+                print(f"  Step 2 attempt {attempt + 1} notice: {e}")
+                time.sleep(2)
 
         print("  ✓ Step 2 Complete: Clinical reasoning finished.")
 
@@ -364,17 +376,12 @@ Output the Clinical JSON Object with Differentials sorted by Prevalence."""
             "differential_considerations": normalized_diffs,
             "pathophysiology": pathophysiology,
             "recommendations": recommendations,
-            "extraction_method": method
+            "extraction_method": "pymupdf"
         })
 
     except Exception as e:
-        err_msg = str(e)
-        err_trace = traceback.format_exc()
-        print(f"Report Analysis Error: {err_msg}\n{err_trace}")
-        return jsonify({
-            "error": f"Report Analysis Error: {err_msg}",
-            "details": err_trace
-        }), 500
+        print(f"Report Analysis Error: {e}")
+        return jsonify({"error": "An error occurred during report analysis.", "details": str(e)}), 500
 
 
 @app.route("/api/export-pdf", methods=["POST"])
@@ -476,7 +483,7 @@ def export_pdf():
                 lab_table.setStyle(TableStyle([
                     ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f1f5f9')),
                     ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#334155')),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTNAME', (0, 0), (-1, 0), "Helvetica-Bold"),
                     ('FONTSIZE', (0, 0), (-1, 0), 9),
                     ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
                     ('TOPPADDING', (0, 0), (-1, -1), 4),
@@ -528,7 +535,6 @@ def export_pdf():
 if __name__ == "__main__":
     print("=" * 60)
     print("MediCare AI Backend API Starting...")
-    print(f"Generation Model: {GENERATION_MODEL}")
-    print(f"Tesseract Installed: {TESSERACT_AVAILABLE}")
+    print(f"Model: {GENERATION_MODEL}")
     print("=" * 60)
     app.run(debug=True, host="0.0.0.0", port=5000)

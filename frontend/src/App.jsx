@@ -10,8 +10,7 @@ import {
   X, Trash2, Download, Filter, UserPlus, Leaf, TestTube, 
   TestTubes, User, Calendar, Building, ChevronDown, ChevronUp, 
   BarChart2, Layers, GitBranch, Moon, Sun, Copy, Check, RotateCcw, 
-  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target, Zap,
-  Camera, SwitchCamera
+  BrainCircuit, Dna, FileSearch, MessageCircle, Brain, Target
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://medicare-ai-aara-backend.onrender.com";
@@ -37,7 +36,6 @@ const SUGGESTED_PROMPTS = [
   { icon: '🚨', text: "I have severe crushing chest pain radiating to the jaw with shortness of breath." },
 ];
 
-/* ── PREMIUM ICON BADGE ── */
 function PremiumIcon({ Icon, gradient = "from-sky-500 to-indigo-600", size = "lg", glow = "sky" }) {
   const sizes = {
     sm: "w-8 h-8 rounded-lg",
@@ -186,7 +184,6 @@ const exportClinicalPDF = async (reportData) => {
   }
 };
 
-/* ── MAIN APP ── */
 export default function App() {
   const [activeTab, setActiveTab] = useState('chat');
   const [darkMode, setDarkMode] = useState(() => {
@@ -212,12 +209,6 @@ export default function App() {
   const [reportResult, setReportResult] = useState(null);
   const [reportError, setReportError] = useState('');
   const [labFilter, setLabFilter] = useState('ALL');
-
-  /* ── LIVE CAMERA SCANNER STATES ── */
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [cameraStream, setCameraStream] = useState(null);
-  const [facingMode, setFacingMode] = useState('environment'); // 'environment' (back) or 'user' (front)
-  const videoRef = useRef(null);
 
   const [serverHealth, setServerHealth] = useState({ online: false, chunks: 0, docs: 0 });
   const messagesEndRef = useRef(null);
@@ -251,60 +242,6 @@ export default function App() {
   }, []);
 
   useEffect(() => { checkHealth(); const id = setInterval(checkHealth, 60000); return () => clearInterval(id); }, [checkHealth]);
-
-  /* ── CAMERA SCANNER LOGIC ── */
-  const startCamera = async (mode = facingMode) => {
-    try {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: mode, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      });
-      setCameraStream(stream);
-      setIsCameraOpen(true);
-    } catch (err) {
-      alert("Unable to access camera. Please allow camera permissions in your browser.");
-    }
-  };
-
-  useEffect(() => {
-    if (isCameraOpen && videoRef.current && cameraStream) {
-      videoRef.current.srcObject = cameraStream;
-    }
-  }, [isCameraOpen, cameraStream]);
-
-  const stopCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-    setIsCameraOpen(false);
-  };
-
-  const toggleCameraFacing = () => {
-    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
-    setFacingMode(nextMode);
-    startCamera(nextMode);
-  };
-
-  const capturePhoto = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const capturedFile = new File([blob], `scanned_lab_report_${Date.now()}.png`, { type: 'image/png' });
-        setReportFile(capturedFile);
-        stopCamera();
-      }
-    }, 'image/png');
-  };
 
   const clearChatHistory = () => {
     if (window.confirm("Clear all chat history?")) {
@@ -354,9 +291,9 @@ export default function App() {
     try {
       const response = await fetch(`${API_BASE}/api/analyze-report`, { method: 'POST', body: formData });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || data.details || 'Failed to analyze report.');
+      if (!response.ok) throw new Error(data.error || 'Failed to analyze report.');
       setReportResult(data);
-    } catch (err) { setReportError(err.message || "Analysis failed. Please check the uploaded file."); }
+    } catch (err) { setReportError(err.message || "Analysis failed."); }
     finally { setReportLoading(false); }
   };
 
@@ -413,7 +350,7 @@ export default function App() {
           
           <div className="flex items-center justify-between w-full md:w-auto">
             <div className="flex items-center gap-3">
-              <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2.5 rounded-xl shadow-glow-sky shrink-0">
+              <motion.div whileHover={{ scale: 1.05, rotate: 5 }} className="bg-gradient-to-tr from-sky-500 via-teal-500 to-indigo-500 text-white p-2 rounded-xl shadow-glow-sky shrink-0">
                 <Stethoscope className="w-5 h-5 md:w-6 md:h-6" strokeWidth={2.5} />
               </motion.div>
               <div>
@@ -425,6 +362,7 @@ export default function App() {
               </div>
             </div>
             
+            {/* Mobile Actions */}
             <div className="flex md:hidden items-center gap-1.5">
               <button onClick={() => setShowTransparency(true)} className="p-2 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                 <Info className="w-4 h-4" strokeWidth={2.25} />
@@ -435,7 +373,8 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1.5 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
+          {/* Navigation Tabs */}
+          <div className="flex bg-slate-100/80 dark:bg-slate-800 p-1 rounded-xl w-full md:w-auto shadow-inner border border-slate-200 dark:border-slate-700">
             <button onClick={() => setActiveTab('chat')} className={`flex-1 md:flex-none flex justify-center items-center gap-2 px-6 py-2 rounded-lg text-xs md:text-sm font-bold transition-all ${activeTab === 'chat' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}>
               <MessageCircle className="w-4 h-4" strokeWidth={2.25} /> Clinical Assistant
             </button>
@@ -444,6 +383,7 @@ export default function App() {
             </button>
           </div>
 
+          {/* Desktop Actions */}
           <div className="hidden md:flex items-center gap-2.5">
             <button onClick={() => setShowTransparency(true)} className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition">
               <Info className="w-4 h-4 text-sky-600 dark:text-sky-400" strokeWidth={2.25} /> Transparency
@@ -483,49 +423,6 @@ export default function App() {
                 Acknowledge
               </button>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── LIVE CAMERA SCANNER MODAL ── */}
-      <AnimatePresence>
-        {isCameraOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-            <div className="bg-slate-900 rounded-3xl max-w-xl w-full p-5 text-white shadow-2xl border border-slate-800 flex flex-col items-center space-y-4">
-              <div className="w-full flex justify-between items-center border-b border-slate-800 pb-3">
-                <div className="flex items-center gap-2 font-bold text-sm">
-                  <Camera className="w-4 h-4 text-teal-400" /> Live Document Scanner
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={toggleCameraFacing} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300" title="Switch Camera">
-                    <SwitchCamera className="w-4 h-4" />
-                  </button>
-                  <button onClick={stopCamera} className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Video Feed */}
-              <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-center">
-                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-                <div className="absolute inset-6 border-2 border-dashed border-teal-400/60 rounded-xl pointer-events-none flex items-center justify-center">
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-teal-300/80 bg-slate-950/60 px-3 py-1 rounded-full backdrop-blur-sm">
-                    Align Lab Report Here
-                  </span>
-                </div>
-              </div>
-
-              {/* Camera Action Bar */}
-              <div className="flex items-center gap-4 pt-2">
-                <button onClick={stopCamera} className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-bold text-xs">
-                  Cancel
-                </button>
-                <button onClick={capturePhoto} className="px-6 py-3 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-600 hover:to-emerald-600 font-extrabold text-sm shadow-lg flex items-center gap-2">
-                  <Camera className="w-4 h-4" /> Snap & Analyze
-                </button>
-              </div>
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -602,6 +499,7 @@ export default function App() {
                             <button onClick={() => setOpenEvalId(openEvalId === msg.id ? null : msg.id)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-[10px] md:text-xs font-bold border border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors">
                               <BarChart2 className="w-3.5 h-3.5" strokeWidth={2.5} /> Score: {msg.evaluation.composite_score}/100
+                              {openEvalId === msg.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                           )}
                           <CopyButton text={msg.text} />
@@ -746,23 +644,17 @@ export default function App() {
                     <PremiumIcon Icon={UploadCloud} gradient="from-teal-500 to-emerald-600" size="lg" glow="teal" />
                   </motion.div>
                 </div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">Upload Clinical PDF or Image</h3>
-                <span className="text-xs text-slate-500">Supports CBC, Metabolic, Lipid, Renal, Thyroid (PDF, PNG, JPG)</span>
-                <input type="file" accept=".pdf,image/png,image/jpeg,image/jpg,image/webp" onChange={(e) => setReportFile(e.target.files?.[0])} className="hidden" />
+                <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">Upload Clinical PDF</h3>
+                <span className="text-xs text-slate-500">Supports CBC, Metabolic, Lipid, Renal, Thyroid profiles</span>
+                <input type="file" accept=".pdf" onChange={(e) => setReportFile(e.target.files?.[0])} className="hidden" />
               </label>
-
-              {/* DUAL ACTION BUTTONS: FILE UPLOAD vs LIVE CAMERA SCANNER */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-5">
-                <button type="button" onClick={() => startCamera()} className="w-full sm:w-auto px-6 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl font-bold text-xs md:text-sm border border-slate-300 dark:border-slate-700 flex items-center justify-center gap-2 transition-all">
-                  <Camera className="w-4 h-4 text-teal-500" /> Scan with Camera
-                </button>
-                <button type="submit" disabled={!reportFile || reportLoading} className="w-full sm:w-auto flex-1 px-8 py-3.5 bg-gradient-to-r from-teal-600 to-sky-600 hover:from-teal-700 hover:to-sky-700 text-white rounded-xl font-bold text-xs md:text-sm hover:shadow-glow-sky disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-                  {reportLoading ? <><Activity className="w-5 h-5 animate-spin" strokeWidth={2.5} /> Performing RAG Clinical Analysis...</> : <><Sparkles className="w-5 h-5" strokeWidth={2.5} /> Analyze Report</>}
-                </button>
-              </div>
-
+              
               {reportFile && <div className="mt-4 text-sm font-bold text-teal-600 dark:text-teal-400 flex items-center justify-center gap-2"><FileCheck className="w-4 h-4" strokeWidth={2.5} /> {reportFile.name}</div>}
               {reportError && <div className="mt-4 text-xs font-bold text-rose-600 bg-rose-50 dark:bg-rose-900/30 p-3 rounded-xl flex justify-center gap-2"><AlertTriangle className="w-4 h-4" strokeWidth={2.5} /> {reportError}</div>}
+              
+              <button type="submit" disabled={!reportFile || reportLoading} className="mt-5 w-full px-8 py-3.5 bg-gradient-to-r from-teal-600 to-sky-600 hover:from-teal-700 hover:to-sky-700 text-white rounded-xl font-bold text-sm hover:shadow-glow-sky disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                {reportLoading ? <><Activity className="w-5 h-5 animate-spin" strokeWidth={2.5} /> Performing RAG Clinical Analysis...</> : <><Sparkles className="w-5 h-5" strokeWidth={2.5} /> Analyze Report</>}
+              </button>
             </form>
           </motion.div>
 
@@ -919,10 +811,10 @@ export default function App() {
                           <ul className="list-disc pl-5 text-indigo-900 dark:text-indigo-200 space-y-1">{reportResult.recommendations.specialty_consultation.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
-                      {reportResult.recommendations.lifestyle_modifications?.length > 0 && (
+                      {reportResult.lifestyle_modifications?.length > 0 && (
                         <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50">
                           <strong className="text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 mb-2"><Leaf className="w-4 h-4 text-emerald-500" strokeWidth={2.5} /> Lifestyle</strong>
-                          <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.recommendations.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
+                          <ul className="list-disc pl-5 text-emerald-900 dark:text-emerald-200 space-y-1">{reportResult.lifestyle_modifications.map((x, i) => <li key={i}>{x}</li>)}</ul>
                         </div>
                       )}
                     </div>
