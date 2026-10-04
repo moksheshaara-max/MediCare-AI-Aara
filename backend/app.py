@@ -241,50 +241,204 @@ def analyze_report():
 
         print(f"\n[Report Analyzer] Analyzing: {file.filename} ({len(pdf_text)} characters)")
 
-        # STEP 1: EXHAUSTIVE DATA EXTRACTION
-        print("  Step 1: Extracting all lab parameters...")
-        extract_sys_prompt = """You are a highly precise medical laboratory data entry AI.
-Your ONLY job is to extract EVERY SINGLE lab test from the report text.
-DO NOT summarize. DO NOT skip any rows. Extract all tests present.
-Categorize system accurately (Hematology, Renal, Metabolic, Liver, Cardiac, Electrolytes, Urine, Thyroid, Lipid, Coagulation).
+        # STEP 1: EXHAUSTIVE STRUCTURED CLINICAL DATA EXTRACTION
+        # Brain 1 extracts every structured clinical measurement/finding in the PDF,
+        # not only conventional blood laboratory values.
+        print("  Step 1: Extracting all structured clinical parameters...")
 
-RETURN ONLY A JSON ARRAY OF OBJECTS LIKE THIS:
+        extract_sys_prompt = """You are MediCare AI Brain 1, a meticulous clinical report data-extraction engine.
+
+YOUR ONLY TASK:
+Extract EVERY structured clinical parameter, measurement, laboratory result, test result,
+quantitative observation, and clinically meaningful structured finding explicitly present
+in the supplied report text.
+
+This is NOT limited to blood laboratory tests.
+
+INCLUDE ALL APPLICABLE CONTENT FROM:
+- Vitals & anthropometry: BP, pulse, respiratory rate, temperature, SpO2, BMI, waist/hip, etc.
+- Hematology / CBC / ESR
+- Glycemic / metabolic / insulin resistance
+- Lipid profile
+- Kidney function / renal markers / electrolytes / minerals
+- Liver function
+- Thyroid
+- Cardiac biomarkers / inflammatory / cardiovascular risk markers
+- Vitamins / hormones
+- Tumor markers
+- Urine studies / urine microscopy / albuminuria / ACR
+- Stool examination
+- Coagulation, serology, immunology, microbiology, cultures when present
+- ECG measurements and structured ECG findings
+- Echocardiography measurements and valve findings
+- Treadmill / stress-test parameters and structured findings
+- Pulmonary function / spirometry
+- DEXA / bone mineral density
+- Ultrasound measurements and structured organ findings
+- X-ray / CT / MRI / radiology structured findings when explicitly stated
+- Any OTHER structured diagnostic parameter or measured value present in the report
+
+STRICT EXTRACTION RULES:
+1. DO NOT summarize.
+2. DO NOT skip rows because they are normal.
+3. DO NOT skip qualitative rows such as Trace, Negative, Mild regurgitation,
+   No effusion, Sinus, or Inversion in aVL when they are structured results.
+4. Preserve report wording and numeric precision. Do not recalculate values.
+5. Never invent a unit or reference range. If absent, use an empty string for unit and N/A for ref.
+6. If the same parameter occurs in different sections/contexts, preserve BOTH by making the test name context-specific, e.g.:
+   Vitals - Blood Pressure (Right Arm)
+   Treadmill - Baseline Blood Pressure
+   Treadmill - Peak Exercise BP
+7. Categorize each item into a useful system/category. Preferred categories:
+   Vitals & Anthropometry, Hematology, Glycemic & Metabolic, Lipid,
+   Renal & Electrolytes, Liver, Thyroid, Cardiac Biomarkers,
+   Vitamins & Hormones, Tumor Markers, Urine, Stool, ECG,
+   Echocardiography, Stress Test, Pulmonary Function, DEXA,
+   Ultrasound, Radiology, Clinical Examination, Other.
+8. Status must be one of HIGH, LOW, NORMAL, ABNORMAL, UNKNOWN.
+   - Use HIGH/LOW only when direction is clear from the printed reference range.
+   - Use NORMAL when the result clearly satisfies the printed reference/expected finding.
+   - Use ABNORMAL for qualitative abnormalities that are not naturally HIGH/LOW.
+   - Use UNKNOWN when no reliable status can be determined from the report itself.
+9. Extract ONLY information explicitly present in the supplied text.
+10. Return ONLY a JSON array. No markdown. No explanation.
+
+JSON OBJECT SCHEMA:
 [
-  {"system": "Hematology", "test": "Hemoglobin", "result": "8.2", "unit": "g/dL", "ref": "12.0 - 15.0", "status": "LOW"}
+  {
+    "system": "Hematology",
+    "test": "Hemoglobin",
+    "result": "14.8",
+    "unit": "g/dL",
+    "ref": "13.0 - 17.0",
+    "status": "NORMAL"
+  }
 ]
 """
-        extracted_labs = []
-        for attempt in range(3):
-            try:
-                extract_response = client.models.generate_content(
-                    model=GENERATION_MODEL,
-                    contents=f"EXTRACT ALL LAB PARAMETERS FROM THIS REPORT TEXT:\n\n{pdf_text[:15000]}",
-                    config=types.GenerateContentConfig(
-                        system_instruction=extract_sys_prompt,
-                        temperature=0.0,
-                        max_output_tokens=8192,
-                        response_mime_type="application/json",
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+
+        # Overlapping chunks remove the old hard 15,000-character truncation and
+        # improve recall on dense multi-page reports.
+        extraction_chunk_size = 6000
+        extraction_overlap = 700
+        extraction_chunks = []
+
+        cursor = 0
+        text_length = len(pdf_text)
+        while cursor < text_length:
+            chunk_end = min(text_length, cursor + extraction_chunk_size)
+            extraction_chunks.append(pdf_text[cursor:chunk_end])
+            if chunk_end >= text_length:
+                break
+            cursor = max(cursor + 1, chunk_end - extraction_overlap)
+
+        print(
+            f"  Step 1: Processing {len(extraction_chunks)} extraction chunk(s) "
+            f"across {text_length} characters..."
+        )
+
+        raw_extracted_items = []
+
+        for chunk_index, report_chunk in enumerate(extraction_chunks, start=1):
+            chunk_items = []
+
+            for attempt in range(3):
+                try:
+                    extract_response = client.models.generate_content(
+                        model=GENERATION_MODEL,
+                        contents=(
+                            f"REPORT CHUNK {chunk_index} OF {len(extraction_chunks)}\n"
+                            "Extract EVERY structured clinical parameter/finding from this chunk.\n\n"
+                            f"{report_chunk}"
+                        ),
+                        config=types.GenerateContentConfig(
+                            system_instruction=extract_sys_prompt,
+                            temperature=0.0,
+                            max_output_tokens=8192,
+                            response_mime_type="application/json",
+                            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                        )
                     )
-                )
-                if extract_response and extract_response.text:
-                    parsed = parse_json_safely(extract_response.text)
-                    if isinstance(parsed, list):
-                        extracted_labs = parsed
-                        break
-            except Exception as e:
-                print(f"  Step 1 attempt {attempt + 1} notice: {e}")
-                time.sleep(2)
 
-        if not isinstance(extracted_labs, list):
-            extracted_labs = []
+                    if extract_response and extract_response.text:
+                        parsed_chunk = parse_json_safely(extract_response.text)
+                        if isinstance(parsed_chunk, list):
+                            chunk_items = [item for item in parsed_chunk if isinstance(item, dict)]
+                            break
 
-        print(f"  ✓ Step 1 Complete: Extracted {len(extracted_labs)} lab parameters.")
+                except Exception as e:
+                    print(
+                        f"  Step 1 chunk {chunk_index} attempt "
+                        f"{attempt + 1} notice: {e}"
+                    )
+                    time.sleep(2)
+
+            raw_extracted_items.extend(chunk_items)
+            print(
+                f"    ✓ Chunk {chunk_index}/{len(extraction_chunks)}: "
+                f"{len(chunk_items)} structured parameters"
+            )
+
+        # Deterministic de-duplication is required because chunks overlap.
+        # Genuine repeated measurements survive when their context/result differs.
+        extracted_labs = []
+        seen_extracted = set()
+
+        for item in raw_extracted_items:
+            system = str(item.get("system", "Other")).strip() or "Other"
+            test = str(item.get("test", "Clinical Parameter")).strip() or "Clinical Parameter"
+            result = str(item.get("result", "-")).strip() or "-"
+            unit = str(item.get("unit", "")).strip()
+            ref_value = str(item.get("ref", item.get("reference_range", "N/A"))).strip() or "N/A"
+            status = str(item.get("status", "UNKNOWN")).upper().strip()
+
+            if status not in ["HIGH", "LOW", "NORMAL", "ABNORMAL", "UNKNOWN"]:
+                status = "UNKNOWN"
+
+            dedupe_key = (
+                re.sub(r"\s+", " ", system.lower()),
+                re.sub(r"\s+", " ", test.lower()),
+                re.sub(r"\s+", " ", result.lower()),
+                re.sub(r"\s+", " ", unit.lower()),
+                re.sub(r"\s+", " ", ref_value.lower()),
+            )
+
+            if dedupe_key in seen_extracted:
+                continue
+
+            seen_extracted.add(dedupe_key)
+            extracted_labs.append({
+                "system": system,
+                "test": test,
+                "result": result,
+                "unit": unit,
+                "ref": ref_value,
+                "status": status,
+            })
+
+        extraction_counts = {}
+        for item in extracted_labs:
+            category = item.get("system", "Other")
+            extraction_counts[category] = extraction_counts.get(category, 0) + 1
+
+        print(
+            f"  ✓ Step 1 Complete: Extracted "
+            f"{len(extracted_labs)} structured clinical parameters."
+        )
+        for category, count in sorted(
+            extraction_counts.items(),
+            key=lambda x: (-x[1], x[0].lower())
+        ):
+            print(f"      - {category}: {count}")
 
         # STEP 2: CLINICAL REASONING (RAG)
         print("  Step 2: Performing Clinical Reasoning with RAG...")
-        abnormal_labs = [l for l in extracted_labs if isinstance(l, dict) and l.get("status") in ["HIGH", "LOW"]]
-        search_query = ", ".join([f"{l.get('test')} {l.get('status')}" for l in abnormal_labs[:10]])
+        abnormal_labs = [
+            l for l in extracted_labs
+            if isinstance(l, dict) and l.get("status") in ["HIGH", "LOW", "ABNORMAL"]
+        ]
+        search_query = ", ".join(
+            [f"{l.get('test')} {l.get('result')} {l.get('status')}" for l in abnormal_labs[:20]]
+        )
         if not search_query:
             search_query = "Normal complete blood count metabolic panel"
 
@@ -328,7 +482,7 @@ RAW REPORT TEXT (Metadata & Content):
 {pdf_text[:3000]}
 ---
 EXTRACTED LAB VALUES:
-{json.dumps(extracted_labs[:100])}
+{json.dumps(extracted_labs)}
 ---
 Output the Clinical JSON Object with Differentials sorted by Prevalence."""
 
@@ -397,7 +551,7 @@ Output the Clinical JSON Object with Differentials sorted by Prevalence."""
         for lab in extracted_labs:
             if isinstance(lab, dict):
                 status = str(lab.get("status", "UNKNOWN")).upper()
-                if status not in ["LOW", "NORMAL", "HIGH", "UNKNOWN"]:
+                if status not in ["LOW", "NORMAL", "HIGH", "ABNORMAL", "UNKNOWN"]:
                     status = "UNKNOWN"
                 normalized_labs.append({
                     "system": str(lab.get("system", "Other")),
@@ -421,7 +575,7 @@ Output the Clinical JSON Object with Differentials sorted by Prevalence."""
             "differential_considerations": normalized_diffs,
             "pathophysiology": pathophysiology,
             "recommendations": recommendations,
-            "extraction_method": "pymupdf"
+            "extraction_method": "pymupdf+gemini_chunked_exhaustive"
         })
 
     except Exception as e:

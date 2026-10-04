@@ -1177,14 +1177,44 @@ export default function App() {
                           {labs.map((lab, i) => {
                             const st = (lab.status || "").toUpperCase();
                             const bClass = st === "HIGH" ? "border-rose-200 bg-rose-50/50 dark:border-rose-800/50 dark:bg-rose-900/10" : st === "LOW" ? "border-amber-200 bg-amber-50/50 dark:border-amber-800/50 dark:bg-amber-900/10" : st === "NORMAL" ? "border-emerald-200 bg-emerald-50/30 dark:border-emerald-800/50 dark:bg-emerald-900/10" : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-800/50";
+
+                            const resultText = String(lab.result ?? "-");
+                            const isLongResult = resultText.length > 28;
+
                             return (
-                              <motion.div whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 300 }} key={i} className={`p-4 rounded-2xl border ${bClass} shadow-sm hover:shadow-md transition-all`}>
-                                <div className="flex justify-between items-start mb-2">
-                                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200 pr-2 leading-tight">{lab.test}</span>
-                                  <StatusBadge status={st} />
+                              <motion.div
+                                whileHover={{ y: -3 }}
+                                transition={{ type: "spring", stiffness: 300 }}
+                                key={i}
+                                className={`min-w-0 h-full overflow-hidden p-4 rounded-2xl border ${bClass} shadow-sm hover:shadow-md transition-all`}
+                              >
+                                <div className="flex items-start justify-between gap-2 mb-2 min-w-0">
+                                  <span className="min-w-0 flex-1 text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight whitespace-normal break-words [overflow-wrap:anywhere]">
+                                    {lab.test}
+                                  </span>
+                                  <div className="shrink-0">
+                                    <StatusBadge status={st} />
+                                  </div>
                                 </div>
-                                <div className="text-xl font-extrabold text-slate-900 dark:text-white">{lab.result} <span className="text-[10px] font-medium text-slate-500">{lab.unit}</span></div>
-                                <div className="text-[10px] text-slate-500 mt-1">Ref: {lab.reference_range}</div>
+
+                                <div
+                                  className={`min-w-0 text-slate-900 dark:text-white whitespace-normal break-words [overflow-wrap:anywhere] ${
+                                    isLongResult
+                                      ? "text-sm md:text-[15px] font-semibold leading-6"
+                                      : "text-lg md:text-xl font-extrabold leading-tight"
+                                  }`}
+                                >
+                                  {resultText}
+                                  {lab.unit && (
+                                    <span className="ml-1 text-[10px] font-medium text-slate-500 dark:text-slate-400 break-words">
+                                      {lab.unit}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="min-w-0 text-[10px] text-slate-500 dark:text-slate-400 mt-2 whitespace-normal break-words [overflow-wrap:anywhere]">
+                                  Ref: {lab.reference_range || "N/A"}
+                                </div>
                               </motion.div>
                             );
                           })}
