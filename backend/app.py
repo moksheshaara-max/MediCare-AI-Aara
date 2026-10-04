@@ -36,6 +36,23 @@ from google.genai import types
 app = Flask(__name__)
 CORS(app)
 
+ASSISTANT_MODE_ALIASES = {
+    "doctor": "doctor",
+    "clinician": "doctor",
+    "physician": "doctor",
+    "pg": "pg_student",
+    "pg_student": "pg_student",
+    "pg-student": "pg_student",
+    "student": "pg_student",
+}
+
+
+def normalize_assistant_mode_input(value):
+    """Normalize the product-facing Clinical Assistant mode."""
+    normalized = str(value or "doctor").strip().lower()
+    return ASSISTANT_MODE_ALIASES.get(normalized)
+
+
 BOOK_TITLES = {
     "book1.pdf": "Hutchison's Clinical Methods (25th Ed)",
     "book2.pdf": "Manual of Practical Medicine (R Alagappan)",
@@ -130,16 +147,26 @@ def ask():
         data = request.json or {}
         question = data.get("question", "").strip()
         chat_history = data.get("chat_history", [])
+        assistant_mode = normalize_assistant_mode_input(data.get("assistant_mode", "doctor"))
 
         if not question:
             return jsonify({"error": "Question is required."}), 400
+
+        if assistant_mode is None:
+            return jsonify({
+                "error": "Invalid assistant_mode.",
+                "allowed_modes": ["doctor", "pg_student"]
+            }), 400
 
         if is_medical_question(question) == "non_medical":
             return jsonify({
                 "question": question,
                 "answer": get_non_medical_response(),
-                "mode": "non_medical",
-                "accuracy_score": 0.0,
+                "mode": "non_medical",  # legacy alias; prefer evidence_mode
+                "evidence_mode": "non_medical",
+                "assistant_mode": assistant_mode,
+                "accuracy_score": 0.0,  # legacy alias; prefer retrieval_confidence
+                "retrieval_confidence": 0.0,
                 "evaluation": None,
                 "is_medical": False,
                 "is_emergency": False,
@@ -151,8 +178,17 @@ def ask():
         is_emergency = check_emergency(question)
         emergency_msg = get_emergency_message() if is_emergency else None
 
-        chunks = search_medical_chunks(question, top_k=15)
-        answer, mode, accuracy_score, pubmed_papers = generate_answer(question, chunks, chat_history=chat_history)
+        chunks = search_medical_chunks(
+            question,
+            top_k=36,
+            assistant_mode=assistant_mode
+        )
+        answer, mode, retrieval_confidence, pubmed_papers = generate_answer(
+            question,
+            chunks,
+            chat_history=chat_history,
+            assistant_mode=assistant_mode
+        )
 
         eval_metrics = evaluate_response_quality(question, chunks, answer, mode)
         tb_sources_raw, pm_sources = format_sources(chunks, mode, pubmed_papers)
@@ -163,10 +199,19 @@ def ask():
         ]
 
         return jsonify({
-            "question": question, "answer": answer, "mode": mode,
-            "accuracy_score": accuracy_score, "evaluation": eval_metrics,
-            "is_medical": True, "is_emergency": is_emergency, "emergency_message": emergency_msg,
-            "textbook_sources": tb_sources, "pubmed_sources": pm_sources
+            "question": question,
+            "answer": answer,
+            "mode": mode,  # legacy alias; prefer evidence_mode
+            "evidence_mode": mode,
+            "assistant_mode": assistant_mode,
+            "accuracy_score": retrieval_confidence,  # legacy alias; prefer retrieval_confidence
+            "retrieval_confidence": retrieval_confidence,
+            "evaluation": eval_metrics,
+            "is_medical": True,
+            "is_emergency": is_emergency,
+            "emergency_message": emergency_msg,
+            "textbook_sources": tb_sources,
+            "pubmed_sources": pm_sources
         })
     except Exception as e:
         print(f"API Error: {e}")

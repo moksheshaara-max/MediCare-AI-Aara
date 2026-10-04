@@ -37,17 +37,33 @@ SOURCE_METADATA_FIELDS = [
 ]
 
 
+_mongo_client = None
+
+
 def get_mongo_client():
-    """Create and verify a MongoDB client."""
+    """Create one MongoDB client and reuse it for the lifetime of the process."""
+    global _mongo_client
+
     if not MONGODB_URI:
         raise ValueError("MONGODB_URI not set in .env file")
 
-    client = MongoClient(MONGODB_URI)
-    try:
-        client.admin.command("ping")
-    except ConnectionFailure:
-        raise ConnectionFailure("Failed to connect to MongoDB")
-    return client
+    if _mongo_client is None:
+        _mongo_client = MongoClient(
+            MONGODB_URI,
+            maxPoolSize=20,
+            minPoolSize=0,
+            connectTimeoutMS=10000,
+            serverSelectionTimeoutMS=10000,
+        )
+
+        try:
+            _mongo_client.admin.command("ping")
+        except ConnectionFailure:
+            _mongo_client.close()
+            _mongo_client = None
+            raise ConnectionFailure("Failed to connect to MongoDB")
+
+    return _mongo_client
 
 
 def get_collection():
