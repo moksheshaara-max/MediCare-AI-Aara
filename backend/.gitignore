@@ -131,3 +131,41 @@ build/
 # Environment-specific files
 # -------------------------
 *.local
+# -------------------------
+# MediCare AI local KB / rebuild artifacts
+# -------------------------
+
+# Entire local medical document corpus
+data/
+
+# KB audit / benchmark / temporary scripts
+audit_*.py
+benchmark_*.py
+compare_*.py
+dry_run_*.py
+estimate_*.py
+
+# Local rebuild backups
+*_before_kb_rebuild.py
+database/*_before_kb_rebuild.py
+retrieval/*_before_kb_rebuild.py
+
+# Generated KB audit outputs
+current_kb_inventory.txt
+kb_source_audit.csv
+kb_source_audit.txt
+pdf_text_audit.csv
+textbook_metadata_output.txt
+
+# One-off KB utility scripts
+build_clean_icmr_amr_2022_archive.py
+build_icmr_amr_2022_pdf.py
+inspect_sources.py
+inspect_textbook_metadata.py
+mark_ocr_status.py
+reset_knowledge_base.py
+test_bindata_vector.py
+validate_icmr_amr_pdf.py
+
+# Registry backups
+source_registry_before_ocr_status.csv
