@@ -169,3 +169,5 @@ validate_icmr_amr_pdf.py
 
 # Registry backups
 source_registry_before_ocr_status.csv
+# Downloaded ONNX model assets for Render (never commit)
+.runtime_models/

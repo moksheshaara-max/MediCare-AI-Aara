@@ -1,0 +1,23 @@
+# Render 512 MiB CPU web service. Use the original requirements.txt for local ingestion.
+# Deliberately excludes PyTorch, Sentence Transformers, Transformers, CUDA, and GPU drivers.
+pymupdf
+pymongo
+google-genai
+python-dotenv
+rich
+requests
+xmltodict
+flask
+flask-cors
+reportlab
+nltk
+rouge-score
+gunicorn
+pytesseract
+Pillow
+
+# Quantized, CPU-only all-mpnet-base-v2 query inference
+onnxruntime==1.25.0
+tokenizers==0.22.2
+huggingface_hub==1.28.0
+numpy>=2.0,<3.0
