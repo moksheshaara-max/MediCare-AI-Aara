@@ -23,6 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from retrieval.search import (
     search_medical_chunks,
+    classify_pg_query_depth,
+    pg_retrieval_budget,
     is_medical_question,
     get_non_medical_response,
     check_emergency,
@@ -178,9 +180,16 @@ def ask():
         is_emergency = check_emergency(question)
         emergency_msg = get_emergency_message() if is_emergency else None
 
+        # Only PG mode uses automatic learning-depth detection.
+        # Doctor remains on the exact same 36-chunk retrieval request.
+        pg_depth = classify_pg_query_depth(question) if assistant_mode == "pg_student" else None
+        retrieval_k = pg_retrieval_budget(question) if pg_depth else 36
+        if pg_depth:
+            print(f"PG depth={pg_depth} | retrieval target={retrieval_k}")
+
         chunks = search_medical_chunks(
             question,
-            top_k=36,
+            top_k=retrieval_k,
             assistant_mode=assistant_mode
         )
         answer, mode, retrieval_confidence, pubmed_papers = generate_answer(

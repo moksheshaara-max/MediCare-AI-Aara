@@ -1,5 +1,5 @@
 """
-MediCare AI - Retrieval v2.7 (Mode-Aware + Strict Source Resolution + Topic Tiers + Safe Primary Refill)
+MediCare AI - Retrieval v3.1 (Adaptive PG Depth + Context Guards + Comparisons)
 
 Architecture-preserving retrieval pipeline:
 1. Expand medical acronyms and embed the query with all-mpnet-base-v2.
@@ -18,12 +18,14 @@ Architecture-preserving retrieval pipeline:
 8. Classify guideline sources into primary-topic / supplementary / reject tiers.
    Primary-topic guidance may contribute more chunks; narrower/comorbid guidance is
    capped tightly so same-specialty sources cannot crowd out the actual condition.
-9. For focused topics, use more distinct chunks from the few strongly relevant
+9. Apply explicit disease/subtype conflict guards (e.g. T1DM vs T2DM, generic
+   anemia vs CKD-specific anemia, heart failure vs hypertension) before source choice.
+10. For focused topics, use more distinct chunks from the few strongly relevant
    primary sources instead of re-admitting off-topic sources merely to fill quota.
-10. If strict topic filtering leaves fewer than 30 normal-retrieval chunks, refill only
+11. If strict topic filtering leaves fewer than 30 normal-retrieval chunks, refill only
     from already-proven PRIMARY guideline sources using additional non-duplicate chunks.
     Never reopen rejected sources merely to hit quota.
-11. Return ~30-40 useful chunks for normal retrieval when enough relevant evidence exists.
+12. Return ~30-40 useful chunks for normal retrieval when enough relevant evidence exists.
     Source-constrained retrieval may return fewer chunks when the requested source
     contains less relevant material.
 
@@ -46,6 +48,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
+from pymongo.errors import AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError
 
 
 # -----------------------------------------------------------------------------
@@ -91,6 +94,7 @@ DIVERSIFIED_BROAD_SOURCE_MARGIN = 0.060
 DEFAULT_FINAL_K = 36
 MIN_FINAL_K = 30
 MAX_FINAL_K = 40
+PG_MAX_FINAL_K = 50  # PG-only ceiling; Doctor stays capped at 40.
 
 # Per-source diversity caps. These prevent one broad/large reference from
 # dominating final context even when it has many nearby vector matches.
@@ -101,6 +105,44 @@ DOCTOR_OTHER_PER_SOURCE_CAP = 2
 PG_GUIDELINE_PER_SOURCE_CAP = 6
 PG_TEXTBOOK_PER_SOURCE_CAP = 3
 PG_OTHER_PER_SOURCE_CAP = 2
+
+# PG domain-aware candidate augmentation. Only normal diversified PG retrieval uses
+# these extra searches; Doctor Mode and strict source/latest policies are untouched.
+PG_DOMAIN_VECTOR_CANDIDATE_LIMIT = 140
+PG_DOMAIN_VECTOR_NUM_CANDIDATES = 2500
+
+# Overall supplementary-guideline ceilings prevent subtype/comorbidity guidance from
+# crowding out the educational textbook domains requested by a PG student.
+PG_SUPPLEMENTARY_TOTAL_CAP = {
+    "simple": 7,
+    "detailed": 8,
+    "comprehensive": 9,
+}
+
+# Broad PG questions may go a little deeper into a strongly matched PRIMARY
+# guideline source while retaining the existing near-duplicate/page safeguards.
+PG_PRIMARY_SOURCE_CAP_BY_DEPTH = {
+    "simple": 9,
+    "detailed": 11,
+    "comprehensive": 13,
+}
+
+# Detailed/comprehensive PG queries may need more depth from sources that have
+# ALREADY proven relevant. This refill never reopens rejected guideline sources;
+# it only deepens selected primary guidelines and selected role-matched textbooks.
+PG_HIGH_DEPTH_PRIMARY_REFILL_CAP = {
+    "detailed": 18,
+    "comprehensive": 22,
+}
+PG_HIGH_DEPTH_TEXTBOOK_PER_SOURCE_CAP = {
+    "detailed": 5,
+    "comprehensive": 6,
+}
+PG_HIGH_DEPTH_TEXTBOOK_CEILING = {
+    "detailed": 24,
+    "comprehensive": 28,
+}
+PG_HIGH_DEPTH_PAGE_RANGE_CAP = 3
 
 # Topic-tier caps for normal diversified guideline retrieval. Exact primary-topic
 # guidance may dominate more strongly than broad comorbidity/subtype guidance.
@@ -291,6 +333,125 @@ QUERY_METADATA_STOPWORDS = {
 }
 
 
+# Clinically meaningful condition identity is checked against curated source
+# title/topic, not whichever other guideline happened to rank first.  The
+# vocabulary is intentionally modest: an unrecognised topic falls back to the
+# existing conservative matching rather than guessing a diagnosis.
+CLINICAL_TOPIC_PATTERNS = {
+    "asthma": r"\b(?:asthma|asthmatic|bronchial\s+asthma)\b",
+    "tuberculosis": r"\b(?:tuberculosis|\btb\b|mycobacterium\s+tuberculosis)\b",
+    "hiv": r"\b(?:hiv(?:[- ]?[12])?|human\s+immunodeficiency|\baids\b|\bplhiv\b)\b",
+    "postpartum_hemorrhage": r"\b(?:post[- ]?partum\s+h(?:ae|e)morrhag\w*|pph)\b",
+    "preeclampsia": r"\b(?:pre[- ]?eclampsia|eclampsia)\b",
+    "malaria": r"\b(?:malaria|malarial|plasmodium|falciparum)\b",
+    "dengue": r"\b(?:dengue)\b",
+    "nephrotic_syndrome": r"\b(?:nephrotic\s+syndrome)\b",
+    "ckd": r"\b(?:chronic\s+kidney\s+disease|\bckd\b|chronic\s+renal\s+disease)\b",
+    "aki": r"\b(?:acute\s+kidney\s+injury|\baki\b|acute\s+renal\s+(?:injury|failure))\b",
+    "heart_failure": r"\b(?:heart\s+failure|\bhfref\b|\bhfpef\b|\bhfmref\b|\bchf\b)\b",
+    "hypertension": r"\b(?:hypertension|\bhtn\b|high\s+blood\s+pressure)\b",
+    "copd": r"\b(?:\bcopd\b|chronic\s+obstructive\s+pulmonary\s+disease)\b",
+    "pneumonia": r"\b(?:pneumonia|pneumonitis)\b",
+    "type1_diabetes": r"\b(?:type\s*[ -]?1\s+diabetes|\bt1dm\b)\b",
+    "type2_diabetes": r"\b(?:type\s*[ -]?2\s+diabetes|\bt2dm\b)\b",
+    "diabetes": r"\b(?:diabetes|diabetic)\b",
+    "breast_cancer": r"\b(?:breast\s+(?:cancer|carcinoma|neoplasm))\b",
+    "sepsis": r"\b(?:sepsis|septic\s+shock)\b",
+    "atrial_fibrillation": r"\b(?:atrial\s+fibrillation|\bafib\b)\b",
+    "stroke": r"\b(?:stroke|cerebrovascular\s+accident|ischemic\s+cerebral\s+infarct)\b",
+    "urinary_tract_infection": r"\b(?:urinary\s+tract\s+infection|\buti\b|pyelonephritis)\b",
+    "epilepsy": r"\b(?:epilepsy|epilepsies|status\s+epilepticus|seizure)\b",
+}
+
+
+def _clinical_topic_labels(text: str) -> set:
+    value = str(text or "").lower()
+    labels = {
+        label for label, pattern in CLINICAL_TOPIC_PATTERNS.items()
+        if re.search(pattern, value)
+    }
+    # Diabetes in general is a parent condition, not another disease to
+    # compete with its own specifically requested subtypes.
+    if labels & {"type1_diabetes", "type2_diabetes"}:
+        labels.add("diabetes")
+    return labels
+
+
+def _source_clinical_topic_labels(meta: dict) -> set:
+    # Title/topic/source id, not specialty or notes: those often list adjacent
+    # conditions (e.g. HIV/TB collaborations or pediatrics/respiratory medicine).
+    return _clinical_topic_labels(" ".join([
+        str(meta.get("official_title", "")),
+        str(meta.get("topic", "")),
+        str(meta.get("source_id", "")),
+    ]))
+
+
+def _topic_facet_tier(question: str, meta: dict):
+    """Return primary, supplementary, reject, or None (unknown condition)."""
+    query_topics = _clinical_topic_labels(question)
+    if not query_topics:
+        return None
+    source_topics = _source_clinical_topic_labels(meta)
+    shared = query_topics & source_topics
+
+    # Topic identity must come before organization/country and similarity.
+    if not shared:
+        # Non-disease operational guidance can be relevant, but must not become
+        # the primary disease-management source when disease-specific material
+        # is available. Do not force a broad-source fallback here.
+        return "reject"
+
+    title_topic = " ".join([
+        str(meta.get("official_title", "")),
+        str(meta.get("topic", "")),
+    ]).lower()
+
+    # Disease-adjacent programme, screening, and implementation documents are
+    # supplementary. They must not outrank full treatment guidelines.
+    if ("hiv" in query_topics and "tuberculosis" in source_topics
+            and "tuberculosis" not in query_topics):
+        return "supplementary"
+    if ("tuberculosis" in query_topics and "hiv" in source_topics
+            and "hiv" not in query_topics):
+        return "supplementary"
+    # Differentiated-care and family-support manuals are useful operational
+    # references but not primary antimicrobial treatment recommendations.
+    if "tuberculosis" in query_topics and re.search(
+        r"\b(?:differentiated\s+(?:tb|tuberculosis)\s+care|"
+        r"family\s+caregiver|caregiver\s+engagement|"
+        r"community\s+engagement|tb\s+elimination\s+strategy)\b",
+        title_topic,
+    ):
+        return "supplementary"
+    if ("hiv" in query_topics and re.search(r"\badvanced\s+hiv\b", title_topic)
+            and not re.search(r"\badvanced\s+hiv\b", str(question).lower())):
+        return "supplementary"
+    if "malaria" in query_topics and re.search(
+            r"\b(?:national\s+strategic\s+plan|malaria\s+elimination|surveillance\s+programme)\b",
+            title_topic):
+        return "supplementary"
+    return "primary"
+
+
+def _named_organization_is_context_only(question: str, alias: str) -> bool:
+    """Distinguish jurisdiction/programme context from a strict citation order."""
+    if alias != "ntep":
+        return False
+    q = str(question).lower()
+    contextual = bool(re.search(
+        r"\b(?:under|within|in|through)\s+(?:the\s+)?(?:ntep|national\s+tuberculosis\s+elimination\s+programme)\b",
+        q,
+    ))
+    strict = bool(re.search(
+        r"\b(?:according\s+to|cite|use\s+only|exclusively\s+(?:from|using)|"
+        r"specified\s+by|issued\s+by)\s+(?:the\s+)?(?:ntep|national\s+tuberculosis\s+elimination\s+programme)\b"
+        r"|\bntep\s+(?:guideline|guidelines|manual|document|source|sources|recommendations?)\b",
+        q,
+    ))
+    return contextual and not strict
+
+
 VALID_ASSISTANT_MODES = {"doctor", "pg_student"}
 
 
@@ -307,8 +468,12 @@ MEDICAL_ACRONYMS = {
     r"\bhtn\b": "Hypertension High Blood Pressure",
     r"\bmi\b": "Myocardial Infarction Heart Attack",
     r"\bcad\b": "Coronary Artery Disease",
+    r"\bhfref\b": "Heart Failure with Reduced Ejection Fraction HFrEF",
+    r"\bhfpef\b": "Heart Failure with Preserved Ejection Fraction HFpEF",
+    r"\bhfmref\b": "Heart Failure with Mildly Reduced Ejection Fraction HFmrEF",
     r"\bchf\b": "Congestive Heart Failure",
     r"\bhf\b": "Heart Failure",
+    r"\bdka\b": "Diabetic Ketoacidosis",
     r"\bcopd\b": "Chronic Obstructive Pulmonary Disease",
     r"\bsob\b": "Shortness of Breath Dyspnea",
     r"\bcva\b": "Cerebrovascular Accident Stroke",
@@ -398,6 +563,213 @@ def _query_intent(question: str) -> str:
     return "general"
 
 
+# PG depth classification controls context BUDGET, not diagnosis or source priority.
+# Heuristic version 1: deterministic and deliberately conservative.
+PG_DEPTH_BUDGETS = {"simple": 36, "detailed": 45, "comprehensive": 50}
+
+PG_DEPTH_DOMAIN_PATTERNS = (
+    r"\b(?:pathophysiology|pathogenesis|physiology|mechanisms?|etiology|aetiology)\b",
+    r"\b(?:diagnos(?:is|e|tic)|criteria|investigations?|work\s*up|evaluation|screening)\b",
+    r"\b(?:management|treatment|therapy|therapeutic|protocol|guidelines?|algorithms?)\b",
+    r"\b(?:pharmacology|drug|drugs|medications?|dosages?|doses?|adverse effects?|contraindications?)\b",
+    r"\b(?:complications?|prognosis|long.term outcomes?|sequelae)\b",
+    r"\b(?:clinical features?|presentation|signs?|symptoms?|physical examination)\b",
+    r"\b(?:differential(?: diagnosis|s)?|classification|staging|grades?)\b",
+    r"\b(?:recent evidence|clinical trials?|research|emerging therapies?)\b",
+)
+
+
+def classify_pg_query_depth(question: str) -> str:
+    """Classify PG learning scope from what was actually requested.
+
+    Uses explicit breadth/cue phrases and distinct knowledge domains, not query
+    length alone. It never modifies the question or selects medical sources.
+    """
+    q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    if not q:
+        return "simple"
+
+    domains = sum(bool(re.search(pattern, q)) for pattern in PG_DEPTH_DOMAIN_PATTERNS)
+    comprehensive_cue = bool(re.search(
+        r"\b(?:comprehensive(?:ly)?|everything about|complete overview|full overview|"
+        r"complete review|full review|from basics to advanced|cover all aspects|"
+        r"teach me .* comprehensively)\b", q
+    ))
+    detailed_cue = bool(re.search(
+        r"\b(?:in detail|explain in detail|detailed explanation|discuss in detail|"
+        r"long answer|elaborate|step.by.step|in.depth)\b", q
+    ))
+
+    # Explicit basic/short teaching questions should not automatically consume
+    # 45 chunks just because they mention two connected learning domains.
+    basic_cue = bool(re.search(r"\b(?:basic|basics|brief|simple|short\s+answer|short\s+note)\b", q))
+    word_count = len(q.split())
+
+    # Specific guideline comparisons need enough context for both dated sides.
+    # This does not turn a focused "current guideline" lookup into a broad one.
+    guidance_comparison = bool(re.search(
+        r"\b(?:compare|comparison|differences?|changes?|older|previous)\b", q
+    )) and bool(re.search(
+        r"\b(?:guidelines?|approaches?|diagnos(?:is|tic)|treatment|management|current)\b", q
+    ))
+
+    # Detect genuinely multi-part practical care questions, even when their
+    # wording doesn't explicitly say "in detail" or "pharmacology".
+    # Counting DISTINCT elements prevents a repeated keyword from increasing depth.
+    care_elements = (
+        r"\b(?:diagnos(?:is|e|tic)|confirm(?:ing|ation)?|assess(?:ment)?|investigations?|evaluation)\b",
+        r"\b(?:management|treatment|therapy|insulin|medications?)\b",
+        r"\b(?:monitor(?:ing)?|glucose\s+monitoring|follow\s*up\s+testing)\b",
+        r"\b(?:hypoglyc(?:a?emia)|complications?|adverse\s+effects?|red\s+flags?)\b",
+        r"\b(?:prevent(?:ion|ive)?|prophylaxis|vaccination)\b",
+        r"\b(?:follow[ -]?up|long[ -]?term\s+care|reassess(?:ment)?)\b",
+        r"\b(?:inhaler\s+technique|action\s+plan|self[- ]management|treatment\s+adherence)\b",
+        r"\b(?:acute\s+exacerbation|emergency\s+care|exacerbation\s+care|inpatient\s+referral)\b",
+    )
+    care_breadth = sum(bool(re.search(pattern, q)) for pattern in care_elements)
+
+    # Reserve 50 chunks for genuinely broad multi-domain teaching requests.
+    if domains >= 5 or (comprehensive_cue and (domains >= 2 or care_breadth >= 3)):
+        return "comprehensive"
+    if guidance_comparison or care_breadth >= 4:
+        return "detailed"
+    if detailed_cue or comprehensive_cue or domains >= 3:
+        return "detailed"
+    # Multi-component clinical questions are not necessarily labelled "in
+    # detail". Avoid treating a long assessment+therapy+monitoring request
+    # as simple merely because it omits those exact cue words. Preserve
+    # explicit short/basic queries and short focused pharmacology questions.
+    if not basic_cue and word_count >= 17 and (care_breadth >= 3 or domains >= 2):
+        return "detailed"
+    # A deliberate list of three or more independent clinical tasks is a
+    # detailed teaching request even if no exact classifier keywords appear
+    # (e.g. "ECG, troponin interpretation, antithrombotics, invasive care").
+    if not basic_cue and word_count >= 16 and q.count(",") >= 2 and re.search(
+        r"\b(?:explain|discuss|describe|teach|cover|include|including)\b", q
+    ):
+        return "detailed"
+    if basic_cue or (domains <= 2 and word_count <= 27):
+        return "simple"
+    if domains >= 2:
+        return "detailed"
+    return "simple"
+
+
+def pg_retrieval_budget(question: str) -> int:
+    return PG_DEPTH_BUDGETS[classify_pg_query_depth(question)]
+
+
+def _is_broad_pg_learning_request(question: str) -> bool:
+    """Return True when PG intent is broad education rather than a freshness-only lookup."""
+    depth = classify_pg_query_depth(question)
+    roles = _pg_requested_textbook_roles(question)
+    return depth in {"detailed", "comprehensive"} and len(roles) >= 2
+
+
+PG_TEXTBOOK_ROLE_PATTERNS = {
+    "physiology": (
+        r"\bphysiology\b", r"\bphysiologic", r"\bguyton\b",
+    ),
+    "pathology": (
+        r"\bpathology\b", r"\bpathologic", r"\brobbins\b", r"\bmorpholog",
+    ),
+    "pharmacology": (
+        r"\bpharmacology\b", r"\bpharmacodynamic", r"\bpharmacokinetic",
+        r"\btherapeutics?\b", r"\btripathi\b",
+    ),
+    "clinical_medicine": (
+        r"\binternal medicine\b", r"\bclinical medicine\b",
+        r"\bpractical medicine\b", r"\bharrison", r"\bdavidson",
+        r"\bapi textbook of medicine\b", r"\balagappan\b",
+    ),
+}
+
+
+def _textbook_learning_roles(chunk_or_meta: dict) -> set:
+    """Infer educational role(s) from normalized source metadata, not hard-coded IDs."""
+    blob = " ".join([
+        str(chunk_or_meta.get("official_title", "")),
+        str(chunk_or_meta.get("specialty", "")),
+        str(chunk_or_meta.get("topic", "")),
+        str(chunk_or_meta.get("source_id", "")),
+        str(chunk_or_meta.get("book", "")),
+    ]).lower()
+
+    roles = set()
+    for role, patterns in PG_TEXTBOOK_ROLE_PATTERNS.items():
+        if any(re.search(pattern, blob, flags=re.IGNORECASE) for pattern in patterns):
+            roles.add(role)
+    return roles
+
+
+def _pg_requested_textbook_roles(question: str) -> set:
+    """Map the student's requested learning domains to textbook evidence roles."""
+    q = re.sub(r"\s+", " ", str(question or "").lower()).strip()
+    roles = set()
+
+    mechanism = bool(re.search(
+        r"\b(?:pathophysiology|pathogenesis|physiology|mechanisms?|homeostasis|hemodynamics?)\b", q
+    ))
+    pathology = bool(re.search(
+        r"\b(?:pathology|pathogenesis|etiology|aetiology|morphology|histology|lesions?)\b", q
+    ))
+    pharmacology = bool(re.search(
+        r"\b(?:pharmacology|pharmacotherapy|drug|drugs|medications?|medicine|medicines|"
+        r"dose|doses|dosage|dosing|mechanism of action|adverse effects?|side effects?|"
+        r"contraindications?|interactions?|titration|antimicrobials?|antibiotics?|"
+        r"vasopressors?|inotropes?|insulin|anticoagulants?|diuretics?|"
+        r"beta[ -]?blockers?|sglt2(?:[ -]?inhibitors?)?)\b", q
+    ))
+    clinical = bool(re.search(
+        r"\b(?:clinical features?|presentation|diagnos(?:is|tic)|differential|investigations?|"
+        r"work\s*up|management|treatment|complications?|prognosis|approach|staging|classification)\b", q
+    ))
+
+    if mechanism:
+        roles.add("physiology")
+    # Pathology is reserved for disease pathogenesis/pathology signals, not every
+    # generic "mechanism" request (e.g. mechanism of action of a drug).
+    disease_pathology = pathology or bool(re.search(
+        r"\b(?:pathophysiology|pathogenesis|etiology|aetiology)\b", q
+    ))
+    if disease_pathology:
+        roles.add("pathology")
+    if pharmacology:
+        roles.add("pharmacology")
+    if clinical or not roles:
+        roles.add("clinical_medicine")
+
+    return roles
+
+
+def _pg_role_target(depth: str, role: str) -> int:
+    """Small role reservations; these are relevance-gated targets, never forced quotas."""
+    if depth == "comprehensive":
+        return 4 if role == "clinical_medicine" else 3
+    if depth == "detailed":
+        return 3 if role == "clinical_medicine" else 2
+    return 2
+
+
+def _pg_textbook_budget(final_k: int, intent: str, depth: str) -> tuple:
+    """Return (target, ceiling) for PG textbook context at the detected depth."""
+    if depth == "comprehensive":
+        target = 21 if intent in {"mixed", "educational", "general"} else 17
+        ceiling = 22 if intent in {"mixed", "educational", "general"} else 19
+    elif depth == "detailed":
+        target = 17 if intent in {"mixed", "educational", "general"} else 14
+        ceiling = 18 if intent in {"mixed", "educational", "general"} else 16
+    else:
+        if intent == "educational":
+            target, ceiling = round(final_k * 0.39), min(15, round(final_k * 0.42))
+        elif intent == "management":
+            target, ceiling = round(final_k * 0.28), min(12, round(final_k * 0.34))
+        else:
+            target, ceiling = round(final_k * 0.33), min(14, round(final_k * 0.39))
+
+    return min(target, final_k), min(ceiling, final_k)
+
+
 def _query_prefers_indian_guidance(question: str) -> bool:
     q = question.lower()
     explicit_india = any(term in q for term in INDIA_TERMS)
@@ -439,11 +811,21 @@ def _load_source_metadata():
         "notes": 1,
     }
 
-    metadata = {}
-    for doc in sources_collection.find({}, projection):
-        source_id = doc.get("source_id")
-        if source_id:
-            metadata[source_id] = doc
+    retryable = (AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError)
+    for attempt in range(3):
+        try:
+            metadata = {}
+            for doc in sources_collection.find({}, projection):
+                source_id = doc.get("source_id")
+                if source_id:
+                    metadata[source_id] = doc
+            break
+        except retryable as exc:
+            if attempt == 2:
+                raise
+            pause = 0.6 * (2 ** attempt)
+            print(f"MongoDB metadata read retry {attempt + 2}/3 ({type(exc).__name__})")
+            time.sleep(pause)
 
     _source_metadata_cache = metadata
     _source_metadata_cache_loaded_at = now
@@ -529,6 +911,157 @@ def _topic_identity_terms(meta: dict) -> set:
     return topic_terms if topic_terms else title_terms
 
 
+def _clear_topic_mismatch(question: str, meta: dict) -> bool:
+    """Reject manifestly wrong-disease clinical-guideline metadata.
+
+    This is a conservative veto, not an attempt to diagnose/validate a guideline
+    from a title. General textbooks/critical-care containers are still eligible;
+    no source is *forced in* to fill the context. Registry titles/topics are the
+    evidence for this check, not a similarity-score cutoff.
+    """
+    q = str(question or "").lower()
+    meta_identity = " ".join([
+        str(meta.get("official_title", "")),
+        str(meta.get("topic", "")),
+        str(meta.get("source_id", "")),
+    ]).lower()
+    # The exact disease requested should not be answered from clinical
+    # guidance about an unrelated malignant organ, obstetric condition,
+    # kidney disease, burns or liver transplantation.
+    conflicts = (
+        (r"\bbreast\s+(?:cancer|carcinoma)\b", r"\b(?:bladder|pancreatic|prostate|cervical|ovarian|lung)\s+cancer\b"),
+        (r"\b(?:post[- ]?partum\s+h(?:ae|e)morrhag\w*|pph)\b", r"\b(?:burn\s+injur|burns|liver\s+transplant|solid\s+organ\s+transplant)"),
+        (r"\b(?:pre[- ]?eclampsia|eclampsia)\b", r"\b(?:liver\s+transplant|burn\s+injur|burns)"),
+        (r"\b(?:nephrotic\s+syndrome|steroid[- ]sensitive\s+nephrotic)\b", r"\b(?:adpkd|autosomal\s+dominant\s+polycystic\s+kidney)\b"),
+        (r"\b(?:acute\s+kidney\s+injury|\baki\b)\b", r"\b(?:respiratory\s+(?:diseases|medicine)|liver\s+transplant|burns?)\b"),
+    )
+    if any(re.search(qpat, q) and re.search(spat, meta_identity)
+           for qpat, spat in conflicts):
+        return True
+
+    # Drug-susceptible TB and drug-resistant TB are different treatment
+    # pathways. Similarity on the shared words "TB", "management", and
+    # "monitoring" must not make an MDR/RR-TB protocol a primary source for
+    # explicitly drug-susceptible disease. Comparison requests asking about
+    # both subtypes retain both source families.
+    ds_tb = bool(re.search(
+        r"\b(?:drug[-\s]susceptible|drug[-\s]sensitive|ds[-\s]?tb|"
+        r"rifampicin[-\s]susceptible)\b", q
+    ))
+    dr_tb = bool(re.search(
+        r"\b(?:drug[-\s]resistan\w*|multi[-\s]?drug[-\s]resistan\w*|"
+        r"mdr[-/\s]?(?:rr[-/\s]?)?tb|rr[-\s]?tb|"
+        r"rifampicin[-\s]resistan\w*)\b", q
+    ))
+    source_dr_tb = bool(re.search(
+        r"\b(?:drug[-\s]resistan\w*|multi[-\s]?drug[-\s]resistan\w*|"
+        r"mdr[-/\s]?(?:rr[-/\s]?)?tb|rr[-\s]?tb|"
+        r"rifampicin[-\s]resistan\w*)\b", meta_identity
+    )) or str(meta.get("source_id", "")).lower().startswith("ntep_dr_tb_")
+    if ds_tb and not dr_tb and source_dr_tb:
+        return True
+
+    # A *prevention* programme document is not a treatment guideline for
+    # newly diagnosed active pulmonary TB. Preventive therapy should still be
+    # retrievable for explicit latent infection/contact preventive questions.
+    active_tb = bool(re.search(
+        r"\b(?:newly\s+diagnosed|drug[- ]susceptible|rifampicin[- ]resistant|multidrug[- ]resistant|active\s+tb|active\s+tuberculosis)\b", q
+    ))
+    wants_tpt = bool(re.search(
+        r"\b(?:latent\s+tb|tb\s+preventive\s+treatment|tpt|preventive\s+therapy|contact\s+preventive)\b", q
+    ))
+    if active_tb and not wants_tpt and re.search(
+        r"\b(?:tb\s+preventive\s+treatment|tuberculosis\s+preventive\s+treatment)\b", meta_identity
+    ):
+        return True
+
+    return False
+
+
+def _has_explicit_disease_context_conflict(question: str, meta: dict) -> bool:
+    """Reject clearly incompatible disease/subtype-specific sources.
+
+    This guard is intentionally conservative. It only acts when the query names a
+    specific disease/subtype (or a generic condition that should not be narrowed
+    to a comorbidity-specific guideline). Broad sources that cover both requested
+    subtypes remain eligible.
+    """
+    if _clear_topic_mismatch(question, meta):
+        return True
+
+    q_raw = str(question).lower()
+    q = expand_medical_acronyms(q_raw).lower()
+    blob = " ".join([
+        str(meta.get("official_title", "")),
+        str(meta.get("topic", "")),
+        str(meta.get("specialty", "")),
+    ]).lower()
+
+    # Diabetes subtype identity. A source explicitly covering BOTH type 1 and
+    # type 2 diabetes remains eligible; a type-1-only source cannot become primary
+    # evidence for an explicit type-2 query and vice versa.
+    query_t1 = bool(re.search(r"\b(?:t1dm|type\s*1\s+diabetes(?:\s+mellitus)?)\b", q_raw)) or "type 1 diabetes" in q
+    query_t2 = bool(re.search(r"\b(?:t2dm|type\s*2\s+diabetes(?:\s+mellitus)?)\b", q_raw)) or "type 2 diabetes" in q
+    source_t1 = bool(re.search(r"\b(?:t1dm|type\s*1\s+diabetes(?:\s+mellitus)?)\b", blob))
+    source_t2 = bool(re.search(r"\b(?:t2dm|type\s*2\s+diabetes(?:\s+mellitus)?)\b", blob))
+
+    if query_t1 and not query_t2 and source_t2 and not source_t1:
+        return True
+    if query_t2 and not query_t1 and source_t1 and not source_t2:
+        return True
+
+    # A diabetes-in-CKD guideline is comorbidity-specific, not core diabetes
+    # guidance. Do not use it for diabetes without renal involvement. Allow it
+    # whenever the user actually asks about CKD/renal disease or renal markers.
+    query_diabetes = bool(re.search(r"\b(?:diabetes|diabetic|t[12]dm)\b", q))
+    query_renal_context = bool(re.search(
+        r"\b(?:ckd|chronic\s+kidney\s+disease|diabetic\s+kidney\s+disease|"
+        r"kidneys?|renal|nephro\w*|e-?gfr|dialysis|albuminuria|proteinuria|"
+        r"creatinine|uacr)\b", q
+    ))
+    source_diabetes = bool(re.search(r"\b(?:diabetes|diabetic)\b", blob))
+    source_ckd_specific = bool(re.search(
+        r"\b(?:ckd|chronic\s+kidney\s+disease|diabetic\s+kidney\s+disease)\b",
+        blob,
+    ))
+    if query_diabetes and not query_renal_context and source_diabetes and source_ckd_specific:
+        return True
+
+    # Heart failure and hypertension share many drug terms. Do not allow a
+    # hypertension-only guideline to become the topic anchor for an explicit
+    # heart-failure query (or vice versa) unless the query actually asks about both.
+    query_hf = bool(re.search(
+        r"\b(?:heart\s+failure|hfr?ef|hfpef|hfmref|congestive\s+heart\s+failure|chf)\b",
+        q,
+    ))
+    query_htn = bool(re.search(r"\b(?:hypertension|high\s+blood\s+pressure|htn)\b", q))
+    source_hf = bool(re.search(r"\b(?:heart\s+failure|hfr?ef|hfpef|hfmref|congestive\s+heart\s+failure)\b", blob))
+    source_htn = bool(re.search(r"\b(?:hypertension|high\s+blood\s+pressure)\b", blob))
+
+    if query_hf and not query_htn and source_htn and not source_hf:
+        return True
+    if query_htn and not query_hf and source_hf and not source_htn:
+        return True
+
+    # Generic anemia questions should not be anchored to CKD-specific anemia
+    # guidance unless the user supplied renal/CKD context.
+    query_anemia = bool(re.search(r"\b(?:anemia|anaemia|microcytic|macrocytic)\b", q))
+    query_renal = bool(re.search(
+        r"\b(?:ckd|chronic\s+kidney\s+disease|kidney|renal|nephro\w*|egfr|dialysis)\b",
+        q,
+    ))
+    source_anemia = bool(re.search(r"\b(?:anemia|anaemia)\b", blob))
+    source_renal = bool(re.search(
+        r"\b(?:ckd|chronic\s+kidney\s+disease|kidney|renal|nephro\w*)\b",
+        blob,
+    ))
+
+    if query_anemia and not query_renal and source_anemia and source_renal:
+        return True
+
+    return False
+
+
 def _build_guideline_topic_tiers(question: str, reranked: list) -> dict:
     """Classify guideline sources as primary / supplementary / reject.
 
@@ -544,12 +1077,36 @@ def _build_guideline_topic_tiers(question: str, reranked: list) -> dict:
     if not stats:
         return {}
 
+    # First try an anchor based on the QUESTION, not the top-ranked source.
+    # Previously an incidental national/critical-care source could become the
+    # anchor and reject all 100+ chunks from the exact WHO clinical guideline.
+    # Retain the original algorithm for unrecognised/implicit conditions.
+    qlabels = _clinical_topic_labels(question)
+    if qlabels:
+        query_tiers = {}
+        found_primary = False
+        for sid in stats:
+            meta = metadata_by_id.get(sid, {})
+            if not _is_guideline(meta):
+                continue
+            if (_has_explicit_population_conflict(question, meta)
+                    or _has_explicit_disease_context_conflict(question, meta)):
+                continue
+            tier = _topic_facet_tier(question, meta)
+            if tier == "primary":
+                found_primary = True
+            query_tiers[sid] = tier
+        if found_primary:
+            return query_tiers
+
     guideline_items = []
     for source_id, item in stats.items():
         meta = metadata_by_id.get(source_id, {})
         if not _is_guideline(meta):
             continue
         if _has_explicit_population_conflict(question, meta):
+            continue
+        if _has_explicit_disease_context_conflict(question, meta):
             continue
         topic_match = _source_topic_match_score(question, meta)
         guideline_items.append((source_id, item, topic_match))
@@ -668,21 +1225,26 @@ def _has_explicit_population_conflict(question: str, meta: dict) -> bool:
         str(meta.get("topic", "")),
         str(meta.get("specialty", "")),
     ]).lower()
+    notes = str(meta.get("notes", "")).lower()
+    # Source notes may explicitly document mixed-population coverage. They can
+    # broaden an age restriction but must not accidentally tag general guidance
+    # as pregnancy-only merely because pregnancy is mentioned in notes.
+    age_blob = blob + " " + notes
 
     query_adult = bool(re.search(r"\badults?\b", q))
     query_paediatric = bool(re.search(
-        r"\b(?:paediatric|pediatric|child|children|infant|infants|newborn|newborns|neonate|neonates)\b",
+        r"\b(?:paediatric|pediatric|child|children|infant|infants|newborn|newborns|neonate|neonates|\d{1,2}[- ]year[- ]old)\b",
         q,
     ))
 
     source_paediatric = bool(re.search(
         r"\b(?:paediatric|pediatric|paediatrics|pediatrics|child|children|neonatal|neonatology)\b",
-        blob,
+        age_blob,
     ))
-    source_adult = bool(re.search(r"\badults?\b", blob))
+    source_adult = bool(re.search(r"\badults?\b", age_blob))
 
     query_pregnancy = bool(re.search(
-        r"\b(?:pregnan(?:t|cy)|gestational|antenatal|maternal|obstetric|obstetrics)\b",
+        r"\b(?:pregnan(?:t|cy)|gestational|antenatal|maternal|obstetric|obstetrics|post[- ]?partum|postnatal|peri[- ]?partum|puerperal|delivery|childbirth)\b",
         q,
     ))
     source_pregnancy = bool(re.search(
@@ -690,38 +1252,28 @@ def _has_explicit_population_conflict(question: str, meta: dict) -> bool:
         blob,
     ))
 
-    if query_adult and source_paediatric and not query_paediatric:
+    # A guideline covering BOTH children and adults is appropriate for either
+    # subgroup; reject only exclusive population mismatches.
+    if query_adult and source_paediatric and not source_adult and not query_paediatric:
         return True
-    if query_paediatric and source_adult and not query_adult:
+    if query_paediatric and source_adult and not source_paediatric and not query_adult:
         return True
     if query_paediatric and source_pregnancy and not query_pregnancy:
         return True
-    if query_pregnancy and source_paediatric and not query_paediatric:
+    if query_pregnancy and source_paediatric and not source_pregnancy and not query_paediatric:
         return True
 
     # Population-specific sources should not fill generic questions unless the
     # user actually asked for that population.
-    if source_paediatric and not query_paediatric:
+    if source_paediatric and not query_paediatric and not source_adult:
         return True
     if source_pregnancy and not query_pregnancy:
         return True
 
-    # Active-disease treatment questions should not be padded with prevention/
-    # prophylaxis programme guidance unless prevention was actually requested.
-    query_prevention = bool(re.search(
-        r"\b(?:prevent|prevention|preventive|prophylaxis|prophylactic|screen|screening|vaccin(?:e|ation))\b",
-        q,
-    ))
-    source_prevention = bool(re.search(
-        r"\b(?:prevent|prevention|preventive|prophylaxis|prophylactic|screen|screening|vaccin(?:e|ation))\b",
-        blob,
-    ))
-    query_active_management = bool(re.search(
-        r"\b(?:manage|managed|management|treat|treated|treatment|therapy|therapeutic)\b",
-        q,
-    ))
-    if query_active_management and source_prevention and not query_prevention:
-        return True
+    # Do not reject a guideline simply because its title contains "prevention".
+    # WHO PPH guidance, GOLD COPD, and other current clinical guidelines cover
+    # prevention AND treatment. True active-TB/TPT conflicts are handled by
+    # _clear_topic_mismatch instead of blanket substring matching.
 
     return False
 
@@ -745,6 +1297,7 @@ def _apply_diversified_source_relevance_guard(question: str, reranked: list) -> 
     allowed_guideline_sources = set()
     rejected_guideline_sources = set()
     population_conflict_sources = set()
+    disease_context_conflict_sources = set()
 
     for source_id, source_score in source_best.items():
         meta = metadata_by_id.get(source_id, {})
@@ -755,11 +1308,21 @@ def _apply_diversified_source_relevance_guard(question: str, reranked: list) -> 
                 rejected_guideline_sources.add(source_id)
             continue
 
+        if _has_explicit_disease_context_conflict(question, meta):
+            disease_context_conflict_sources.add(source_id)
+            if _is_guideline(meta):
+                rejected_guideline_sources.add(source_id)
+            continue
+
         if not _is_guideline(meta):
             continue
 
         topic_bonus = _metadata_topic_bonus(question, meta)
         strong_semantic = source_score >= (best_vector - DIVERSIFIED_STRONG_SOURCE_MARGIN)
+        clinical_topic_supported = (
+            _topic_facet_tier(question, meta) in {"primary", "supplementary"}
+            and source_score >= max(0.65, best_vector - 0.23)
+        )
         metadata_supported = (
             topic_bonus > 0.0
             and source_score >= (best_vector - DIVERSIFIED_METADATA_SOURCE_MARGIN)
@@ -769,7 +1332,7 @@ def _apply_diversified_source_relevance_guard(question: str, reranked: list) -> 
             and source_score >= (best_vector - DIVERSIFIED_BROAD_SOURCE_MARGIN)
         )
 
-        if strong_semantic or metadata_supported or broad_source_supported:
+        if clinical_topic_supported or strong_semantic or metadata_supported or broad_source_supported:
             allowed_guideline_sources.add(source_id)
         else:
             rejected_guideline_sources.add(source_id)
@@ -778,7 +1341,7 @@ def _apply_diversified_source_relevance_guard(question: str, reranked: list) -> 
     for chunk in reranked:
         source_id = chunk.get("source_id")
         meta = metadata_by_id.get(source_id, {})
-        if source_id in population_conflict_sources:
+        if source_id in population_conflict_sources or source_id in disease_context_conflict_sources:
             continue
         if _is_guideline(meta) and source_id not in allowed_guideline_sources:
             continue
@@ -937,7 +1500,10 @@ def _resolve_explicit_source_constraint(question: str):
     """
     metadata_by_id = _load_source_metadata()
     direct_ids = _direct_named_source_ids(question, metadata_by_id)
-    aliases = _detect_source_aliases(question)
+    aliases = [
+        alias for alias in _detect_source_aliases(question)
+        if not _named_organization_is_context_only(question, alias)
+    ]
 
     if not direct_ids and not aliases:
         return None
@@ -1108,9 +1674,16 @@ def _choose_relevant_source_ids(
     KDIGO 2024 lupus nephritis) from leaking into a request explicitly about the
     KDIGO 2024 chronic kidney disease guideline.
     """
+    metadata_by_id = _load_source_metadata()
     filtered = [
         c for c in candidates
-        if not allowed_ids or c.get("source_id") in allowed_ids
+        if (allowed_ids is None or c.get("source_id") in allowed_ids)
+        and not _has_explicit_disease_context_conflict(
+            question, metadata_by_id.get(c.get("source_id"), {})
+        )
+        and not _has_explicit_population_conflict(
+            question, metadata_by_id.get(c.get("source_id"), {})
+        )
     ]
     stats = _source_stats(filtered)
     if not stats:
@@ -1167,13 +1740,16 @@ def _choose_freshest_applicable_source_ids(
 
     Order of operations is deliberate:
       1. current guideline only
-      2. topical/vector applicability
-      3. India-national preference for India-oriented management
-      4. newest known publication year
-      5. strongest source relevance within that newest year
+      2. explicit population/disease-subtype compatibility for auto-freshness
+      3. registry topic identity (before vector similarity)
+      4. vector applicability within the resolved topic
+      5. India-national preference for India-oriented management
+      6. newest known publication year
+      7. strongest source relevance within that newest year
 
-    Undated sources are not allowed to displace a dated current guideline when a
-    clearly applicable dated source exists.
+    Topic identity is resolved before recency so a newer but clinically adjacent
+    guideline (for example hypertension) cannot displace the correct disease
+    guideline (for example HFrEF/heart failure).
     """
     filtered = []
     metadata_by_id = _load_source_metadata()
@@ -1188,33 +1764,53 @@ def _choose_freshest_applicable_source_ids(
         meta = metadata_by_id.get(source_id, {})
         if not _is_guideline(meta) or not _is_current(meta):
             continue
+        if _has_explicit_population_conflict(question, meta):
+            continue
+        if _has_explicit_disease_context_conflict(question, meta):
+            continue
         filtered.append(chunk)
 
     stats = _source_stats(filtered)
     if not stats:
         return [], None
 
+    for item in stats.values():
+        item["topic_match"] = _source_topic_match_score(question, item["meta"])
+
     ranked = sorted(
         stats.values(),
         key=lambda item: (
+            item["topic_match"],
             item["max_vector_score"],
-            _metadata_topic_bonus(question, item["meta"]),
             item["max_retrieval_score"],
         ),
         reverse=True,
     )
 
-    best_vector = ranked[0]["max_vector_score"]
-    applicable = [
-        item
-        for item in ranked
-        if item["max_vector_score"] >= (best_vector - SOURCE_RELEVANCE_MARGIN)
-    ]
-    if not applicable:
-        applicable = [ranked[0]]
+    best_topic_match = ranked[0]["topic_match"]
+
+    # When curated metadata gives us a real disease/topic signal, resolve that
+    # identity first. Exact ties are allowed so multiple genuinely equivalent
+    # current sources can still compete on authority/year/vector relevance.
+    if best_topic_match > (0, 0.0, 0, 0):
+        applicable = [
+            item for item in ranked
+            if item["topic_match"] == best_topic_match
+        ]
+    else:
+        best_vector = ranked[0]["max_vector_score"]
+        applicable = [
+            item
+            for item in ranked
+            if item["max_vector_score"] >= (best_vector - SOURCE_RELEVANCE_MARGIN)
+        ]
+        if not applicable:
+            applicable = [ranked[0]]
 
     # For management/threshold questions in this India-oriented CDS, choose the
-    # latest relevant Indian national guidance when such guidance exists.
+    # latest relevant Indian national guidance only AFTER the disease topic has
+    # been resolved. This prevents unrelated India guidance from winning merely
+    # because it is national/current.
     if _query_prefers_indian_guidance(question):
         indian_national = [
             item for item in applicable
@@ -1238,6 +1834,7 @@ def _choose_freshest_applicable_source_ids(
 
     applicable.sort(
         key=lambda item: (
+            item["topic_match"],
             item["max_retrieval_score"],
             item["max_vector_score"],
         ),
@@ -1301,6 +1898,11 @@ def _select_constrained_chunks(
 
 
 def _vector_search_candidates(query_embedding, candidate_limit: int, num_candidates: int) -> list:
+    """Execute Atlas Vector Search, retrying *only* transient connection failures.
+
+    Do not turn a failed network operation into an apparently valid empty result.
+    Non-transient issues (invalid index/pipeline/authentication) still propagate.
+    """
     pipeline = [
         {
             "$vectorSearch": {
@@ -1326,7 +1928,263 @@ def _vector_search_candidates(query_embedding, candidate_limit: int, num_candida
             }
         },
     ]
-    return list(collection.aggregate(pipeline))
+
+    retryable = (AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError)
+    for attempt in range(3):
+        try:
+            return list(collection.aggregate(pipeline))
+        except retryable as exc:
+            if attempt == 2:
+                raise
+            wait_seconds = 0.6 * (2 ** attempt)
+            print(
+                f"MongoDB transient connection failure; "
+                f"retrying search {attempt + 2}/3 in {wait_seconds:.1f}s "
+                f"({type(exc).__name__})"
+            )
+            time.sleep(wait_seconds)
+    return []
+
+
+def _comparison_guideline_pairs(question: str, reranked: list) -> tuple:
+    """Find an older-dated and newer-dated guideline on the *same query topic*.
+
+    An older publication is not automatically superseded: return source-specific
+    publication years so the synthesis can describe exactly what was compared.
+    Never fabricate a pair when the vector candidate pool lacks two dated sources.
+    """
+    if not _is_comparison_request(question):
+        return [], []
+
+    query_terms = _metadata_terms(expand_medical_acronyms(question))
+    by_source = {}
+    for chunk in reranked:
+        if _candidate_kind(chunk) != "guideline":
+            continue
+        if _has_explicit_population_conflict(question, chunk):
+            continue
+        if _has_explicit_disease_context_conflict(question, chunk):
+            continue
+        year = _publication_year(chunk)
+        if year is None:
+            continue
+        # Curated source topic/title must contain at least one substantive
+        # disease term from the user's question. A nearby specialty alone is not enough.
+        identity = _topic_identity_terms(chunk)
+        if not (identity & query_terms):
+            continue
+        source_id = chunk.get("source_id")
+        if not source_id:
+            continue
+        by_source.setdefault(source_id, []).append(chunk)
+
+    if len(by_source) < 2:
+        return [], []
+
+    best = []
+    for source_id, chunks in by_source.items():
+        chunks.sort(key=lambda c: (
+            c.get("vector_score", c.get("score", 0.0)),
+            c.get("retrieval_score", 0.0)
+        ), reverse=True)
+        meta = chunks[0]
+        year = _publication_year(meta)
+        topic_overlap = len(_topic_identity_terms(meta) & query_terms)
+        best.append((year, topic_overlap, float(chunks[0].get("vector_score", 0.0)), source_id, chunks))
+
+    # Keep only sources with the best *disease identity*, then select dates.
+    # Different publication years can represent different authorities, not
+    # necessarily revisions of the same guideline; metadata is preserved.
+    max_overlap = max(item[1] for item in best)
+    eligible = [item for item in best if item[1] == max_overlap]
+    years = sorted({item[0] for item in eligible})
+    if len(years) < 2:
+        return [], []
+
+    older_year, newer_year = years[0], years[-1]
+    def best_for_year(year):
+        return max(
+            (item for item in eligible if item[0] == year),
+            key=lambda item: item[2]
+        )
+
+    old = best_for_year(older_year)
+    new = best_for_year(newer_year)
+    result = []
+    for row, temporal_role in ((old, "older_dated"), (new, "newer_dated")):
+        # Search beyond the first three candidate chunks, because nearby vector
+        # hits can be near duplicates from the same page. Reserve up to three
+        # DISTINCT passages without manufacturing evidence when fewer exist.
+        signatures = []
+        for c in row[4]:
+            signature = _token_signature(c.get("text", ""))
+            if _is_near_duplicate(signature, signatures):
+                continue
+            item = dict(c)
+            item["comparison_role"] = temporal_role
+            result.append(item)
+            signatures.append(signature)
+            if len(signatures) >= 3:
+                break
+    return result, [(old[3], older_year), (new[3], newer_year)]
+
+
+def _ensure_comparison_pair(selected: list, extra: list, final_k: int) -> list:
+    """Reserve up to three distinct evidence passages per dated comparison side."""
+    if not extra:
+        return selected
+    wanted = {}
+    for c in extra:
+        sid = c.get("source_id")
+        wanted.setdefault(sid, []).append(c)
+    if len(wanted) < 2:
+        return selected
+    output = list(selected)
+    keys = {c.get("chunk_id") for c in output if c.get("chunk_id")}
+    for source_id, items in wanted.items():
+        current = sum(1 for c in output if c.get("source_id") == source_id)
+        for item in items:
+            if current >= 3:
+                break
+            if item.get("chunk_id") and item.get("chunk_id") in keys:
+                continue
+            signature = _token_signature(item.get("text", ""))
+            # Distinct guideline sources are not duplicates of each other for
+            # historical/current comparison, even when wording overlaps.
+            same_source_signatures = [
+                _token_signature(c.get("text", "")) for c in output
+                if c.get("source_id") == source_id
+            ]
+            if _is_near_duplicate(signature, same_source_signatures):
+                continue
+            item = dict(item)
+            if len(output) >= final_k:
+                # Drop the weakest non-comparison context, never the counterpart.
+                evict = next((i for i in range(len(output)-1, -1, -1)
+                              if output[i].get("source_id") not in wanted), None)
+                if evict is None:
+                    break
+                output.pop(evict)
+            output.append(item)
+            if item.get("chunk_id"):
+                keys.add(item["chunk_id"])
+            current += 1
+    output.sort(key=lambda c: (c.get("retrieval_score", 0.0), c.get("vector_score", 0.0)), reverse=True)
+    return output[:final_k]
+
+
+def _pg_domain_search_queries(question: str) -> list:
+    """Build targeted textbook subqueries for requested PG learning domains."""
+    roles = _pg_requested_textbook_roles(question)
+    depth = classify_pg_query_depth(question)
+    queries = []
+
+    if "physiology" in roles:
+        queries.append((
+            "physiology",
+            f"{question} physiology homeostasis organ function hemodynamics physiological mechanisms",
+        ))
+
+    if "pathology" in roles:
+        queries.append((
+            "pathology",
+            f"{question} pathology pathogenesis morphology disease mechanisms histopathology",
+        ))
+
+    if "pharmacology" in roles:
+        queries.append((
+            "pharmacology",
+            f"{question} pharmacology therapeutics mechanism of action dosing adverse effects contraindications drug interactions",
+        ))
+
+    # Clinical-medicine sources are normally strong in the broad base query, so
+    # they do not need a separate search. Keep extra Atlas calls bounded.
+    max_queries = 3 if depth == "comprehensive" else 2
+    return queries[:max_queries]
+
+
+def _merge_pg_reranked_textbooks(base_reranked: list, domain_textbooks: list) -> list:
+    """Merge targeted PG textbook results after base guideline filtering is complete."""
+    merged = {}
+    order = []
+
+    def key_for(chunk):
+        chunk_id = chunk.get("chunk_id")
+        if chunk_id:
+            return ("id", chunk_id)
+        return (
+            "fallback",
+            chunk.get("source_id") or chunk.get("book"),
+            chunk.get("page_start", chunk.get("page")),
+            chunk.get("page_end", chunk.get("page")),
+            str(chunk.get("text", ""))[:120],
+        )
+
+    for chunk in base_reranked:
+        key = key_for(chunk)
+        merged[key] = dict(chunk)
+        order.append(key)
+
+    for domain_label, chunks in domain_textbooks:
+        for chunk in chunks:
+            key = key_for(chunk)
+            domain_score = float(chunk.get("vector_score", chunk.get("score", 0.0)) or 0.0)
+            if key in merged:
+                item = merged[key]
+                origins = list(item.get("pg_domain_origins", []))
+                if domain_label not in origins:
+                    origins.append(domain_label)
+                item["pg_domain_origins"] = origins
+                item["pg_domain_score"] = max(
+                    float(item.get("pg_domain_score", 0.0) or 0.0), domain_score
+                )
+            else:
+                item = dict(chunk)
+                item["pg_domain_origins"] = [domain_label]
+                item["pg_domain_score"] = domain_score
+                item["pg_domain_only"] = True
+                merged[key] = item
+                order.append(key)
+
+    output = [merged[key] for key in order]
+    output.sort(
+        key=lambda c: (c.get("retrieval_score", 0.0), c.get("vector_score", 0.0)),
+        reverse=True,
+    )
+    return output
+
+
+def _augment_pg_reranked_textbooks(question: str, base_reranked: list) -> tuple:
+    """Recover requested textbook domains without altering guideline source filtering."""
+    domain_textbooks = []
+
+    for label, domain_query in _pg_domain_search_queries(question):
+        query_embedding = embed_query(domain_query)
+        if not query_embedding:
+            continue
+
+        raw_candidates = _vector_search_candidates(
+            query_embedding,
+            PG_DOMAIN_VECTOR_CANDIDATE_LIMIT,
+            PG_DOMAIN_VECTOR_NUM_CANDIDATES,
+        )
+        reranked = _attach_metadata_and_rerank(question, raw_candidates, "pg_student")
+
+        # Domain augmentation is textbook-only. This is deliberate: the normal
+        # base query remains solely responsible for guideline authority/topic tiers.
+        # It prevents a targeted physiology/pharmacology query from weakening or
+        # reshaping the established guideline guard.
+        textbooks = [
+            chunk for chunk in reranked
+            if _candidate_kind(chunk) == "textbook"
+            and not _has_explicit_population_conflict(question, chunk)
+        ]
+        domain_textbooks.append((label, textbooks))
+
+    merged = _merge_pg_reranked_textbooks(base_reranked, domain_textbooks)
+    added = max(0, len(merged) - len(base_reranked))
+    tagged = sum(1 for chunk in merged if chunk.get("pg_domain_origins"))
+    return merged, domain_textbooks, added, tagged
 
 
 # -----------------------------------------------------------------------------
@@ -1404,6 +2262,14 @@ def _priority_adjustment(question: str, meta: dict, assistant_mode: str) -> floa
             adjustment += 0.015
             if intent in {"educational", "mixed", "general"}:
                 adjustment += 0.025
+
+            # Purposeful evidence mixture: reward a textbook when its curated
+            # metadata matches a learning domain explicitly requested by the PG.
+            requested_roles = _pg_requested_textbook_roles(question)
+            source_roles = _textbook_learning_roles(meta)
+            matched_roles = requested_roles & source_roles
+            if matched_roles:
+                adjustment += min(0.045, 0.022 + 0.010 * len(matched_roles))
 
     # Curated metadata relevance is intentionally modest: it breaks ties in favor
     # of sources whose title/topic/specialty matches the actual query, but vector
@@ -1529,6 +2395,20 @@ def _is_relevant_enough_for_reserved_slot(chunk: dict, best_vector_score: float)
     return score >= floor
 
 
+def _pg_textbook_effective_score(chunk: dict) -> float:
+    """Use domain-query similarity for PG textbook selection without overwriting raw score."""
+    return max(
+        float(chunk.get("vector_score", 0.0) or 0.0),
+        float(chunk.get("pg_domain_score", 0.0) or 0.0),
+    )
+
+
+def _is_relevant_enough_pg_textbook(chunk: dict, best_vector_score: float) -> bool:
+    score = _pg_textbook_effective_score(chunk)
+    floor = max(0.48, best_vector_score - 0.20)
+    return score >= floor
+
+
 def _try_add_chunk(
     chunk: dict,
     selected: list,
@@ -1634,26 +2514,49 @@ def _diversify_candidates(question: str, reranked: list, final_k: int, assistant
             )
 
     else:
-        # PG Student Mode: management remains guideline-led, but textbook depth is
-        # intentionally reserved for mechanism/background/differential reasoning.
-        if intent == "educational":
-            textbook_target = round(final_k * 0.39)  # ~14 of 36
-            textbook_ceiling = min(15, round(final_k * 0.42))
-        elif intent == "management":
-            textbook_target = round(final_k * 0.28)  # ~10 of 36
-            textbook_ceiling = min(12, round(final_k * 0.34))
-        else:  # mixed/general
-            textbook_target = round(final_k * 0.33)  # ~12 of 36
-            textbook_ceiling = min(14, round(final_k * 0.39))
+        # PG Student Mode: adaptive, domain-aware evidence composition. Current
+        # guidelines still control management, while requested textbook domains
+        # receive small relevance-gated reservations.
+        depth = classify_pg_query_depth(question)
+        requested_roles = _pg_requested_textbook_roles(question)
+        textbook_target, textbook_ceiling = _pg_textbook_budget(final_k, intent, depth)
+        supplementary_total_cap = PG_SUPPLEMENTARY_TOTAL_CAP.get(depth, 7)
+        primary_source_cap = PG_PRIMARY_SOURCE_CAP_BY_DEPTH.get(depth, PG_PRIMARY_GUIDELINE_CAP)
 
-        # Pass 1: reserve relevant textbook depth. Per-source caps ensure this is
-        # spread across multiple textbooks rather than Harrison dominating.
+        # Pass 1: reserve the explicitly requested textbook learning roles.
+        # Example: a comprehensive CKD question can deliberately recover Guyton
+        # (physiology), Robbins (pathology), KDT (pharmacology), and clinical
+        # medicine texts without forcing any weak match.
+        for role in ("clinical_medicine", "pathology", "physiology", "pharmacology"):
+            if role not in requested_roles:
+                continue
+            role_target = _pg_role_target(depth, role)
+            role_count = 0
+            for chunk in reranked:
+                if role_count >= role_target or len(selected) >= final_k:
+                    break
+                if _candidate_kind(chunk) != "textbook":
+                    continue
+                if role not in _textbook_learning_roles(chunk):
+                    continue
+                if not _is_relevant_enough_pg_textbook(chunk, best_vector_score):
+                    continue
+                added, textbook_count = _try_add_chunk(
+                    chunk, selected, selected_ids, selected_signatures,
+                    source_counts, source_page_counts, mode,
+                    textbook_ceiling, textbook_count,
+                )
+                if added:
+                    role_count += 1
+
+        # Pass 2: fill the remaining textbook target by overall relevance. Per-source
+        # caps keep this spread across API/Harrison/Davidson/Robbins/Guyton/KDT/etc.
         for chunk in reranked:
             if textbook_count >= textbook_target or len(selected) >= final_k:
                 break
             if _candidate_kind(chunk) != "textbook":
                 continue
-            if not _is_relevant_enough_for_reserved_slot(chunk, best_vector_score):
+            if not _is_relevant_enough_pg_textbook(chunk, best_vector_score):
                 continue
             _, textbook_count = _try_add_chunk(
                 chunk, selected, selected_ids, selected_signatures,
@@ -1661,18 +2564,46 @@ def _diversify_candidates(question: str, reranked: list, final_k: int, assistant
                 textbook_ceiling, textbook_count,
             )
 
-        # Pass 2: reserve current guideline evidence for treatment/thresholds.
-        guideline_target = round(final_k * (0.58 if intent in {"management", "mixed"} else 0.50))
+        # Pass 3: reserve the guideline core. Primary-topic guidance is considered
+        # first and can go slightly deeper for detailed/comprehensive PG questions.
+        guideline_target = round(final_k * (0.50 if intent in {"management", "mixed"} else 0.42))
         guideline_count = 0
+        supplementary_count = 0
 
         for chunk in selected:
             if _candidate_kind(chunk) == "guideline":
                 guideline_count += 1
+                if str(chunk.get("topic_tier", "")).lower() == "supplementary":
+                    supplementary_count += 1
 
         for chunk in reranked:
             if guideline_count >= guideline_target or len(selected) >= final_k:
                 break
             if _candidate_kind(chunk) != "guideline":
+                continue
+            if str(chunk.get("topic_tier", "")).lower() != "primary":
+                continue
+            if not _is_relevant_enough_for_reserved_slot(chunk, best_vector_score):
+                continue
+            added, textbook_count = _try_add_chunk(
+                chunk, selected, selected_ids, selected_signatures,
+                source_counts, source_page_counts, mode,
+                textbook_ceiling, textbook_count,
+                source_cap_override=primary_source_cap,
+            )
+            if added:
+                guideline_count += 1
+
+        # Pass 4: add relevant supplementary guideline evidence, but cap the total
+        # so CKD-anemia/BP/diabetes/etc. cannot consume all educational slots.
+        for chunk in reranked:
+            if guideline_count >= guideline_target or len(selected) >= final_k:
+                break
+            if supplementary_count >= supplementary_total_cap:
+                break
+            if _candidate_kind(chunk) != "guideline":
+                continue
+            if str(chunk.get("topic_tier", "")).lower() != "supplementary":
                 continue
             if not _is_relevant_enough_for_reserved_slot(chunk, best_vector_score):
                 continue
@@ -1683,16 +2614,78 @@ def _diversify_candidates(question: str, reranked: list, final_k: int, assistant
             )
             if added:
                 guideline_count += 1
+                supplementary_count += 1
 
-        # Pass 3: fill remaining slots by overall reranked relevance.
+        # Pass 5: fill remaining slots by overall relevance while preserving the
+        # textbook ceiling and supplementary-guideline ceiling.
         for chunk in reranked:
             if len(selected) >= final_k:
                 break
-            _, textbook_count = _try_add_chunk(
+            kind = _candidate_kind(chunk)
+            tier = str(chunk.get("topic_tier", "")).lower()
+            if kind == "guideline" and tier == "supplementary":
+                if supplementary_count >= supplementary_total_cap:
+                    continue
+            added, textbook_count = _try_add_chunk(
                 chunk, selected, selected_ids, selected_signatures,
                 source_counts, source_page_counts, mode,
                 textbook_ceiling, textbook_count,
+                source_cap_override=(primary_source_cap if kind == "guideline" and tier == "primary" else None),
             )
+            if added and kind == "guideline" and tier == "supplementary":
+                supplementary_count += 1
+
+        # Pass 6: high-depth safe refill. Detailed/comprehensive PG questions can
+        # deepen sources that have ALREADY proved relevant, so the 45/50 budgets
+        # are achievable without reopening rejected guideline neighbors.
+        if depth in {"detailed", "comprehensive"} and len(selected) < final_k:
+            proven_source_ids = {
+                c.get("source_id") or c.get("book")
+                for c in selected
+                if (c.get("source_id") or c.get("book"))
+            }
+            refill_primary_cap = PG_HIGH_DEPTH_PRIMARY_REFILL_CAP[depth]
+            refill_textbook_source_cap = PG_HIGH_DEPTH_TEXTBOOK_PER_SOURCE_CAP[depth]
+            refill_textbook_ceiling = PG_HIGH_DEPTH_TEXTBOOK_CEILING[depth]
+
+            for chunk in reranked:
+                if len(selected) >= final_k:
+                    break
+
+                source_id = chunk.get("source_id") or chunk.get("book")
+                if not source_id or source_id not in proven_source_ids:
+                    continue
+
+                kind = _candidate_kind(chunk)
+                tier = str(chunk.get("topic_tier", "")).lower()
+
+                if kind == "guideline":
+                    if tier != "primary":
+                        continue
+                    if not _is_relevant_enough_for_reserved_slot(chunk, best_vector_score):
+                        continue
+                    source_override = refill_primary_cap
+                    ceiling_for_add = refill_textbook_ceiling
+
+                elif kind == "textbook":
+                    source_roles = _textbook_learning_roles(chunk)
+                    if requested_roles and not (source_roles & requested_roles):
+                        continue
+                    if not _is_relevant_enough_pg_textbook(chunk, best_vector_score):
+                        continue
+                    source_override = refill_textbook_source_cap
+                    ceiling_for_add = refill_textbook_ceiling
+
+                else:
+                    continue
+
+                _, textbook_count = _try_add_chunk(
+                    chunk, selected, selected_ids, selected_signatures,
+                    source_counts, source_page_counts, mode,
+                    ceiling_for_add, textbook_count,
+                    source_cap_override=source_override,
+                    page_range_cap_override=PG_HIGH_DEPTH_PAGE_RANGE_CAP,
+                )
 
     # Safe focused-topic refill: if strict filtering leaves fewer than the normal
     # 30-chunk target, deepen only already-proven PRIMARY guideline sources. This
@@ -1760,7 +2753,7 @@ def search_medical_chunks(
     - Calls requesting 12/15 chunks are upgraded to the v2 default context of 36.
 
     Important:
-    - The 30-40 target applies to normal diversified retrieval.
+    - Doctor normal target remains 30-40; PG can request up to 50.
     - Strict source/latest retrieval never pads with unrelated sources merely to
       reach the target; it may therefore return fewer chunks.
     """
@@ -1776,7 +2769,8 @@ def search_medical_chunks(
     except (TypeError, ValueError):
         requested_k = DEFAULT_FINAL_K
 
-    final_k = max(MIN_FINAL_K, min(requested_k, MAX_FINAL_K))
+    mode_max_k = PG_MAX_FINAL_K if mode == "pg_student" else MAX_FINAL_K
+    final_k = max(MIN_FINAL_K, min(requested_k, mode_max_k))
     if requested_k < MIN_FINAL_K:
         final_k = DEFAULT_FINAL_K
 
@@ -1784,10 +2778,17 @@ def search_medical_chunks(
     wants_fresh = _wants_fresh_guidance(question)
     comparison = _is_comparison_request(question)
 
+    # A broad PG teaching request may mention "current guidelines" as one domain
+    # among many. In that case, keep diversified retrieval so current guidance can
+    # coexist with physiology/pathology/pharmacology textbooks. Explicit named
+    # sources still remain strict, and focused freshness-only questions remain strict.
+    broad_pg_learning = mode == "pg_student" and _is_broad_pg_learning_request(question)
+    auto_strict_freshness = wants_fresh and not comparison and not broad_pg_learning
+
     # ------------------------------------------------------------------
     # Policy A/B: explicit source lock and/or strict freshness
     # ------------------------------------------------------------------
-    if source_constraint is not None or (wants_fresh and not comparison):
+    if source_constraint is not None or auto_strict_freshness:
         try:
             candidates = _vector_search_candidates(
                 query_embedding,
@@ -1896,25 +2897,43 @@ def search_medical_chunks(
             return selected
 
         except Exception as e:
-            print(f"Search error: {e}")
-            return []
+            print(f"Search error: {type(e).__name__}: {e}")
+            raise
 
     # ------------------------------------------------------------------
     # Policy C: normal mode-aware diversified retrieval
     # ------------------------------------------------------------------
-    candidate_limit = max(VECTOR_CANDIDATE_LIMIT, final_k * 5)
+    candidate_limit = (
+        CONSTRAINED_VECTOR_CANDIDATE_LIMIT if comparison
+        else max(VECTOR_CANDIDATE_LIMIT, final_k * 5)
+    )
 
     try:
-        candidates = _vector_search_candidates(
+        base_candidates = _vector_search_candidates(
             query_embedding,
             candidate_limit,
             VECTOR_NUM_CANDIDATES,
         )
-        reranked = _attach_metadata_and_rerank(question, candidates, mode)
+        reranked = _attach_metadata_and_rerank(question, base_candidates, mode)
+        comparison_candidates, comparison_sources = _comparison_guideline_pairs(question, reranked)
         reranked, filtered_guideline_sources = _apply_diversified_source_relevance_guard(
             question, reranked
         )
+
+        pg_domain_pools = []
+        pg_domain_added = 0
+        pg_domain_tagged = 0
+        if mode == "pg_student":
+            reranked, pg_domain_pools, pg_domain_added, pg_domain_tagged = _augment_pg_reranked_textbooks(
+                question, reranked
+            )
+
         selected = _diversify_candidates(question, reranked, final_k, mode)
+        if comparison_candidates:
+            selected = _ensure_comparison_pair(selected, comparison_candidates, final_k)
+            print(f"  Comparison guideline pair: {comparison_sources}")
+        elif comparison:
+            print("  Comparison note: no valid dated older/newer guideline pair in candidate pool")
 
         if selected:
             guideline_count = sum(1 for c in selected if _candidate_kind(c) == "guideline")
@@ -1945,9 +2964,16 @@ def search_medical_chunks(
 
             print(
                 "Retrieval v2 | "
-                f"policy=diversified | mode={mode} | intent={_query_intent(question)} | "
-                f"{len(candidates)} candidates -> {len(selected)} final | "
-                f"guidelines={guideline_count} "
+                + f"policy=diversified | mode={mode} | intent={_query_intent(question)} | "
+                + (f"depth={classify_pg_query_depth(question)} | target={final_k} | " if mode == "pg_student" else "")
+                + ("freshness=blended | " if mode == "pg_student" and wants_fresh and broad_pg_learning else "")
+                + (
+                    f"{len(base_candidates)} base | PG-domain tagged={pg_domain_tagged}, new={pg_domain_added} "
+                    if mode == "pg_student" and pg_domain_pools
+                    else f"{len(base_candidates)} candidates "
+                )
+                + f"-> {len(selected)} final | "
+                + f"guidelines={guideline_count} "
                 f"(primary={primary_guideline_count}, supplementary={supplementary_guideline_count}), "
                 f"textbooks={textbook_count}, other={other_count}, "
                 f"India={indian_count}, India-national={national_india_count}, "
@@ -1957,8 +2983,8 @@ def search_medical_chunks(
         return selected
 
     except Exception as e:
-        print(f"Search error: {e}")
-        return []
+        print(f"Search error: {type(e).__name__}: {e}")
+        raise
 
 
 # -----------------------------------------------------------------------------

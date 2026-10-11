@@ -1,4 +1,4 @@
-pymupdf
+﻿pymupdf
 pymongo
 google-genai
 python-dotenv
@@ -11,6 +11,12 @@ reportlab
 nltk
 rouge-score
 gunicorn
-huggingface_hub
+
+# Local MPNet query embeddings
+torch==2.13.0
+sentence-transformers==6.0.0
+transformers==5.15.1
+huggingface_hub==1.28.0
+
 pytesseract
 Pillow
