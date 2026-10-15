@@ -143,6 +143,10 @@ EVIDENCE HIERARCHY — FOLLOW STRICTLY:
     A 9-month FQ-dependent regimen requires FQ resistance to be excluded.
     Do not equate WHO options with automatic NTEP programme eligibility.
     Reflect the same distinction in ALL Mermaid branches, tables and prose.
+16. Textbook passages are permitted internally for mechanisms and explanatory
+    depth, but do NOT mention textbook titles, authors, editions, or references
+    in the final prose. Retain machine provenance tokens during internal review;
+    the public renderer deliberately hides textbook citation tokens.
 """
 
 
@@ -1516,27 +1520,19 @@ def generate_answer(
                 continue
 
             mode_labels = {
-                "books_and_research": "📚🔬 [Grounded in Clinical Guidelines, Medical Textbooks & NIH PubMed Research]",
-                "books": "📚 [Grounded in Clinical Guidelines & Medical Textbooks]",
-                "research": "🔬 [Grounded in Live NIH PubMed Clinical Research Papers]",
-                "fallback": "🤖 [General Clinical Knowledge — Not directly grounded in indexed clinical sources]",
+                "books_and_research": "[Grounded in Retrieved Clinical Evidence and PubMed Research]",
+                "books": "[Grounded in Retrieved Clinical Evidence]",
+                "research": "[Grounded in Live NIH PubMed Clinical Research Papers]",
+                "fallback": "[General Clinical Knowledge — Not directly grounded in indexed clinical sources]",
             }
-
-            # The strict-freshness path can contain guidelines but no textbooks;
-            # don't claim that both types were used when the actual context differs.
-            if chunks and mode in {"books", "books_and_research"}:
-                has_guideline = any(_chunk_source_kind(c) == "Guideline" for c in chunks)
-                has_textbook = any(_chunk_source_kind(c) == "Textbook" for c in chunks)
-                evidence_types = []
-                if has_guideline:
-                    evidence_types.append("Clinical Guidelines")
-                if has_textbook:
-                    evidence_types.append("Medical Textbooks")
-                if pubmed_papers:
-                    evidence_types.append("NIH PubMed Research")
-                if evidence_types:
-                    mode_labels[mode] = "[Grounded in " + ", ".join(evidence_types) + "]"
-            labeled_answer = f"{mode_labels.get(mode, '')}\n\n{answer}"
+            has_guideline = any(_chunk_source_kind(c) == "Guideline" for c in (chunks or []))
+            if has_guideline:
+                mode_labels[mode] = (
+                    "[Grounded in Clinical Guidelines and PubMed Research]"
+                    if pubmed_papers else "[Grounded in Clinical Guidelines]"
+                )
+            public_answer = _hide_textbook_citations_for_public_answer(answer, chunks)
+            labeled_answer = f"{mode_labels.get(mode, '')}\n\n{public_answer}"
             result = (labeled_answer, mode, accuracy_percentage, pubmed_papers)
 
             if not chat_history:
@@ -1562,6 +1558,29 @@ def generate_answer(
     return "Failed to generate response. Please try again.", "error", 0.0, []
 
 
+
+
+def _hide_textbook_citations_for_public_answer(answer: str, chunks: list) -> str:
+    """Redact textbook source IDs ONLY AFTER the complete internal safety gate.
+
+    Keep the medical prose, guideline citations, PubMed IDs, and internal
+    provenance verification unchanged. The public UI renders references
+    separately and does not expose machine tokens in answer text.
+    """
+    output = str(answer or "")
+    textbook_ids = {
+        str(c.get("source_id") or "").strip()
+        for c in (chunks or [])
+        if isinstance(c, dict) and _chunk_source_kind(c) == "Textbook"
+    }
+    for sid in textbook_ids:
+        if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", sid):
+            output = re.sub(
+                rf"[ \t]*\[KB:{re.escape(sid)}(?::p[0-9]{{1,5}})?\]",
+                "", output, flags=re.IGNORECASE,
+            )
+    return re.sub(r"[ \t]+(?=[.,;!?])", "", output)
+
 def format_sources(chunks: list, mode: str, pubmed_papers: list = None):
     if mode == "fallback":
         return [], []
@@ -1571,9 +1590,14 @@ def format_sources(chunks: list, mode: str, pubmed_papers: list = None):
 
     if chunks:
         for chunk in chunks:
+            if _chunk_source_kind(chunk) != "Guideline":
+                continue  # Background references never enter the public source list.
             source_id = str(chunk.get("source_id") or "")
             book = chunk.get("official_title") or chunk.get("book") or "Medical Reference"
-            page = chunk.get("page", chunk.get("page_start", 1))
+            raw_page = chunk.get("page")
+            if raw_page is None or str(raw_page).strip().lower() in {"", "n/a", "none", "unknown"}:
+                raw_page = chunk.get("page_start")
+            page = int(raw_page) if re.fullmatch(r"[0-9]{1,5}", str(raw_page or "")) else None
             score = chunk.get("score", 0.0)
             key = f"{source_id or book}_p{page}"
             if key not in seen:

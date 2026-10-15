@@ -209,23 +209,41 @@ function MermaidFallbackBlock({ chart }) {
 function cleanAssistantMarkdown(text) {
   if (!text) return '';
   return String(text)
-    .replace(
-      /^\s*(?:📚🔬|📚|🔬|🤖)?\s*\[(?:Grounded in|General Clinical Knowledge)[^\]]*\]\s*/i,
-      ''
-    )
+    .replace(/^\s*(?:📚🔬|📚|🔬|🤖)?\s*\[(?:Grounded in|General Clinical Knowledge|Evidence reviewed)[^\]]*\]\s*/i, '')
+    // Internal provenance tokens are not presentation citations. They remain
+    // checked inside Python before a response is returned to the browser.
+    .replace(/[ \t]*\[(?:KB:|PMID:)[^\]\n]{0,700}\]/gi, '')
+    .replace(/[ \t]+(?=[.,;!?])/g, '')
     .trim();
 }
 
 function evidenceModeLabel(mode) {
   const labels = {
-    books_and_research: 'Guidelines · Textbooks · PubMed',
-    books: 'Guidelines · Textbooks',
+    books_and_research: 'Clinical evidence · PubMed',
+    books: 'Clinical evidence',
     research: 'PubMed',
     fallback: 'General knowledge',
     non_medical: 'Non-medical',
     error: 'Unavailable',
   };
-  return labels[mode] || String(mode || '').replaceAll('_', ' ');
+  return labels[mode] || 'Clinical evidence';
+}
+
+// /api/ask currently exposes guideline documents under the legacy
+// textbook_sources field, without source_type. Filter conservatively so an
+// older Render deployment cannot accidentally expose a textbook title.
+function visibleGuidelineSources(sources) {
+  const guidelineTitle = /\b(guidelines?|standards?|consensus|recommendations?|protocol|clinical practice|ntep|icmr|who|esc|nice|aha|acc|ada)\b/i;
+  const backgroundBook = /harrison|davidson|kumar|macleod|textbook|oxford.handbook|api.medicine|internal.medicine.\d+e|robbins|ganong|guyton|braunwald/i;
+  const seen = new Set();
+  return (Array.isArray(sources) ? sources : []).filter((source) => {
+    const label = String(source?.display_name || source?.file_name || '').trim();
+    if (!label || backgroundBook.test(label) || !guidelineTitle.test(label)) return false;
+    const key = label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 8);
 }
 
 function ClinicalPathwayBlock({ chart }) {
@@ -368,6 +386,137 @@ function ClinicalPathwayBlock({ chart }) {
 }
 
 
+
+// Keep Markdown/Mermaid components stable between chat-input keystrokes.
+const CLINICAL_MARKDOWN_COMPONENTS = {
+    h1({ children }) {
+      return <h1 className="mt-7 mb-3 text-xl md:text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white break-words">{children}</h1>;
+    },
+    h2({ children }) {
+      return <h2 className="mt-7 mb-3 text-lg md:text-xl font-extrabold tracking-tight text-slate-950 dark:text-white break-words">{children}</h2>;
+    },
+    h3({ children }) {
+      return (
+        <h3 className="mt-6 mb-3 flex items-start gap-2.5 text-base md:text-lg font-extrabold text-slate-900 dark:text-white break-words">
+          <span className="mt-2 w-1.5 h-5 rounded-full bg-gradient-to-b from-sky-500 to-indigo-600 shrink-0" />
+          <span className="min-w-0">{children}</span>
+        </h3>
+      );
+    },
+    h4({ children }) {
+      return <h4 className="mt-5 mb-2 text-sm md:text-base font-bold text-slate-900 dark:text-slate-100 break-words">{children}</h4>;
+    },
+    p({ children }) {
+      return <p className="my-3 text-[13px] sm:text-sm md:text-[15px] leading-6 md:leading-7 text-slate-700 dark:text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</p>;
+    },
+    ul({ children }) {
+      return <ul className="my-3 space-y-2 pl-1">{children}</ul>;
+    },
+    ol({ children }) {
+      return <ol className="my-3 space-y-2 pl-1">{children}</ol>;
+    },
+    li({ children }) {
+      return (
+        <li className="flex items-start gap-2.5 text-[13px] sm:text-sm md:text-[15px] leading-6 md:leading-7 text-slate-700 dark:text-slate-300 min-w-0">
+          <span className="mt-[0.62rem] w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0" />
+          <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</span>
+        </li>
+      );
+    },
+    strong({ children }) {
+      return <strong className="font-extrabold text-slate-950 dark:text-white">{children}</strong>;
+    },
+    em({ children }) {
+      return <em className="text-slate-700 dark:text-slate-300">{children}</em>;
+    },
+    hr() {
+      return <hr className="my-6 border-slate-200 dark:border-slate-700" />;
+    },
+    blockquote({ children }) {
+      return (
+        <blockquote className="my-4 rounded-r-xl border-l-4 border-sky-500 bg-sky-50/70 dark:bg-sky-950/20 px-4 py-2 text-slate-700 dark:text-slate-300">
+          {children}
+        </blockquote>
+      );
+    },
+    table({ children }) {
+      return (
+        <div className="my-5 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
+          <div className="md:hidden flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Clinical table</span>
+            <span className="text-[10px] text-slate-400">Swipe horizontally →</span>
+          </div>
+          <div className="w-full overflow-x-auto overscroll-x-contain">
+            <table className="min-w-[760px] md:min-w-full w-full text-xs md:text-sm leading-relaxed">
+              {children}
+            </table>
+          </div>
+        </div>
+      );
+    },
+    thead({ children }) {
+      return <thead className="bg-slate-100 dark:bg-slate-800/95">{children}</thead>;
+    },
+    tbody({ children }) {
+      return <tbody className="divide-y divide-slate-200 dark:divide-slate-800">{children}</tbody>;
+    },
+    tr({ children }) {
+      return <tr className="even:bg-slate-50/60 dark:even:bg-slate-800/20">{children}</tr>;
+    },
+    th({ children }) {
+      return <th className="px-3.5 md:px-4 py-3.5 text-left align-bottom font-extrabold text-slate-950 dark:text-white border-b border-slate-200 dark:border-slate-700 whitespace-normal">{children}</th>;
+    },
+    td({ children }) {
+      return <td className="px-3.5 md:px-4 py-3.5 align-top text-slate-700 dark:text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</td>;
+    },
+    pre({ children }) {
+      return <>{children}</>;
+    },
+    code({ inline, className, children, ...props }) {
+      const str = String(children).replace(/\n$/, '').trim();
+      const isMermaid = !inline && (
+        className?.includes('language-mermaid') ||
+        className?.includes('mermaid') ||
+        str.startsWith('flowchart ') ||
+        str.startsWith('graph ')
+      );
+      const isAsciiClinicalPathway = !inline
+        && /[│├└►→]/.test(str)
+        && /(stage|grade|therapy|treatment|management|blood pressure|diagnosis|initiate|emergency)/i.test(str);
+
+      if (isMermaid) return <MermaidDiagram chart={str} />;
+      if (isAsciiClinicalPathway) return <ClinicalPathwayBlock chart={str} />;
+
+      if (inline) {
+        return (
+          <code
+            className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-sky-700 dark:text-sky-300 text-[0.92em] whitespace-normal break-words"
+            {...props}
+          >
+            {children}
+          </code>
+        );
+      }
+
+      return (
+        <pre className="my-4 max-w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-950 text-slate-100 p-4 text-xs md:text-sm leading-6 whitespace-pre">
+          <code className={className} {...props}>{children}</code>
+        </pre>
+      );
+    }
+};
+
+const ClinicalAnswerMarkdown = React.memo(function ClinicalAnswerMarkdown({ text }) {
+  const renderedText = useMemo(() => cleanAssistantMarkdown(text), [text]);
+  return (
+    <div className="markdown-body min-w-0 max-w-full overflow-hidden">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={CLINICAL_MARKDOWN_COMPONENTS}>
+        {renderedText}
+      </ReactMarkdown>
+    </div>
+  );
+});
+
 function StatusBadge({ status }) {
   const s = (status || "UNKNOWN").toUpperCase();
   const config = {
@@ -486,7 +635,7 @@ export default function App() {
   const [labFilter, setLabFilter] = useState('ALL');
 
   const [serverHealth, setServerHealth] = useState({ online: false, chunks: 0, docs: 0 });
-  const messagesEndRef = useRef(null);
+  const chatScrollRef = useRef(null);
   const inputRef = useRef(null);
 
   useEffect(() => { localStorage.setItem('medicare_chat_history', JSON.stringify(messages)); }, [messages]);
@@ -504,7 +653,10 @@ export default function App() {
     localStorage.setItem('medicare_theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
-  const scrollToBottom = useCallback(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, []);
+  const scrollToBottom = useCallback(() => {
+    const scroller = chatScrollRef.current;
+    if (scroller) scroller.scrollTo({ top: scroller.scrollHeight, behavior: 'auto' });
+  }, []);
   useEffect(() => { if (activeTab === 'chat') scrollToBottom(); }, [messages, loading, activeTab, scrollToBottom]);
 
   const checkHealth = useCallback(async () => {
@@ -536,7 +688,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      const chatHistory = messages.slice(-6).map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: (m.text || '').substring(0, 500) }));
+      const chatHistory = messages.slice(-6).map(m => ({ role: m.sender === 'user' ? 'user' : 'assistant', content: cleanAssistantMarkdown(m.text || '').substring(0, 500) }));
       const response = await fetch(`${API_BASE}/api/ask`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -558,6 +710,7 @@ export default function App() {
         evaluation: data.evaluation,
         isEmergency: data.is_emergency,
         emergencyMessage: data.emergency_message,
+        guidelineSources: visibleGuidelineSources(data.textbook_sources),
         pubmedSources: data.pubmed_sources || [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }]);
@@ -625,7 +778,7 @@ export default function App() {
   }, [activeTab, messages.length]);
 
   return (
-    <div className="flex flex-col min-h-screen relative overflow-x-hidden transition-colors">
+    <div className={`flex flex-col relative transition-colors ${activeTab === 'chat' ? 'h-[100dvh] overflow-hidden' : 'min-h-screen overflow-x-hidden'}`}>
       
       {/* Decorative Background Orbs */}
       <div aria-hidden className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
@@ -634,7 +787,7 @@ export default function App() {
       </div>
 
       {/* ── HEADER ── */}
-      <header className="sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 shadow-sm w-full">
+      <header className="shrink-0 sticky top-0 z-50 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 shadow-sm w-full">
         <div className="max-w-6xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-3 md:gap-6">
           
           <div className="flex items-center justify-between w-full md:w-auto">
@@ -647,7 +800,7 @@ export default function App() {
                   <h1 className="text-lg md:text-xl font-extrabold gradient-text truncate">MediCare AI</h1>
                   <span className="text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 hidden xs:inline-block">Clinical Suite</span>
                 </div>
-                <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 truncate">Guidelines · Textbooks · PubMed · Lab Analysis</p>
+                <p className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400 truncate">Clinical Guidelines · PubMed · Lab Analysis</p>
               </div>
             </div>
             
@@ -700,7 +853,7 @@ export default function App() {
                 </div>
                 <div className="space-y-3">
                   <p className="flex gap-3 items-start"><Target className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Retrieval Confidence:</strong> Vector similarity is a grounding signal, not a measure of clinical accuracy.</span></p>
-                  <p className="flex gap-3 items-start"><BarChart2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Evidence Routing:</strong> Current guidelines are prioritized for management; textbooks add background and mechanisms.</span></p>
+                  <p className="flex gap-3 items-start"><BarChart2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Evidence Routing:</strong> Current clinical guidance is prioritized for management, with supporting evidence for explanation.</span></p>
                   <p className="flex gap-3 items-start"><Microscope className="w-5 h-5 text-purple-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Evaluation Metrics:</strong> BLEU, ROUGE, groundedness, and semantic similarity are internal quality signals, not clinical validation.</span></p>
                   <p className="flex gap-3 items-start"><ShieldAlert className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" strokeWidth={2.5} /><span><strong>Safety:</strong> Educational decision-support only.</span></p>
                 </div>
@@ -715,9 +868,9 @@ export default function App() {
 
       {/* ── CHAT TAB ── */}
       {activeTab === 'chat' && (
-        <main className="flex-1 max-w-5xl mx-auto w-full flex flex-col min-h-0" style={{ height: 'calc(100dvh - 4.5rem)' }}>
+        <main className="flex-1 max-w-5xl mx-auto w-full flex flex-col min-h-0 overflow-hidden">
           
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-3 space-y-4 min-h-0">
+          <div ref={chatScrollRef} className="flex-1 overflow-y-auto px-4 pt-4 pb-3 space-y-4 min-h-0 overscroll-contain">
             
             {messages.length > 0 && (
               <div className="flex justify-end">
@@ -734,7 +887,7 @@ export default function App() {
                 </div>
                 <h2 className="text-xl md:text-2xl font-extrabold text-slate-900 dark:text-white mb-1.5 tracking-tight">Clinical Assistant</h2>
                 <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400 max-w-md mx-auto mb-4">
-                  <span className="font-bold text-sky-700 dark:text-sky-400">Guidelines + Textbooks</span> · <span className="font-bold text-indigo-700 dark:text-indigo-400">Live PubMed</span>
+                  <span className="font-bold text-sky-700 dark:text-sky-400">Clinical Guidelines</span> · <span className="font-bold text-indigo-700 dark:text-indigo-400">Live PubMed</span>
                 </p>
 
                 <div className="mb-4 inline-flex rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-100/80 dark:bg-slate-800 p-1.5 shadow-inner">
@@ -755,7 +908,7 @@ export default function App() {
                 </p>
 
                 <div className="mb-4 flex flex-col items-center gap-1">
-                  <span className="text-[11px] font-bold text-sky-600 dark:text-sky-400 animate-pulse">
+                  <span className="text-[11px] font-bold text-sky-600 dark:text-sky-400">
                     ↓ Type any medical question in the search bar below
                   </span>
                 </div>
@@ -824,7 +977,7 @@ export default function App() {
                               <BarChart2 className="w-3.5 h-3.5" strokeWidth={2.5} /> Quality signal {msg.evaluation.composite_score}/100
                             </button>
                           )}
-                          <CopyButton text={msg.text} />
+                          <CopyButton text={cleanAssistantMarkdown(msg.text)} />
                         </div>
                       </div>
 
@@ -844,148 +997,47 @@ export default function App() {
                         </motion.div>
                       )}
 
-                      <div className="markdown-body min-w-0 max-w-full overflow-hidden">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            h1({ children }) {
-                              return <h1 className="mt-7 mb-3 text-xl md:text-2xl font-extrabold tracking-tight text-slate-950 dark:text-white break-words">{children}</h1>;
-                            },
-                            h2({ children }) {
-                              return <h2 className="mt-7 mb-3 text-lg md:text-xl font-extrabold tracking-tight text-slate-950 dark:text-white break-words">{children}</h2>;
-                            },
-                            h3({ children }) {
-                              return (
-                                <h3 className="mt-6 mb-3 flex items-start gap-2.5 text-base md:text-lg font-extrabold text-slate-900 dark:text-white break-words">
-                                  <span className="mt-2 w-1.5 h-5 rounded-full bg-gradient-to-b from-sky-500 to-indigo-600 shrink-0" />
-                                  <span className="min-w-0">{children}</span>
-                                </h3>
-                              );
-                            },
-                            h4({ children }) {
-                              return <h4 className="mt-5 mb-2 text-sm md:text-base font-bold text-slate-900 dark:text-slate-100 break-words">{children}</h4>;
-                            },
-                            p({ children }) {
-                              return <p className="my-3 text-[13px] sm:text-sm md:text-[15px] leading-6 md:leading-7 text-slate-700 dark:text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</p>;
-                            },
-                            ul({ children }) {
-                              return <ul className="my-3 space-y-2 pl-1">{children}</ul>;
-                            },
-                            ol({ children }) {
-                              return <ol className="my-3 space-y-2 pl-1">{children}</ol>;
-                            },
-                            li({ children }) {
-                              return (
-                                <li className="flex items-start gap-2.5 text-[13px] sm:text-sm md:text-[15px] leading-6 md:leading-7 text-slate-700 dark:text-slate-300 min-w-0">
-                                  <span className="mt-[0.62rem] w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0" />
-                                  <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</span>
-                                </li>
-                              );
-                            },
-                            strong({ children }) {
-                              return <strong className="font-extrabold text-slate-950 dark:text-white">{children}</strong>;
-                            },
-                            em({ children }) {
-                              return <em className="text-slate-700 dark:text-slate-300">{children}</em>;
-                            },
-                            hr() {
-                              return <hr className="my-6 border-slate-200 dark:border-slate-700" />;
-                            },
-                            blockquote({ children }) {
-                              return (
-                                <blockquote className="my-4 rounded-r-xl border-l-4 border-sky-500 bg-sky-50/70 dark:bg-sky-950/20 px-4 py-2 text-slate-700 dark:text-slate-300">
-                                  {children}
-                                </blockquote>
-                              );
-                            },
-                            table({ children }) {
-                              return (
-                                <div className="my-5 w-full max-w-full overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm">
-                                  <div className="md:hidden flex items-center justify-between gap-3 px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Clinical table</span>
-                                    <span className="text-[10px] text-slate-400">Swipe horizontally →</span>
-                                  </div>
-                                  <div className="w-full overflow-x-auto overscroll-x-contain">
-                                    <table className="min-w-[760px] md:min-w-full w-full text-xs md:text-sm leading-relaxed">
-                                      {children}
-                                    </table>
-                                  </div>
+                      <ClinicalAnswerMarkdown text={msg.text} />
+
+                      {(msg.guidelineSources?.length > 0 || msg.pubmedSources?.length > 0) && (
+                        <details className="group pt-4 border-t border-slate-100 dark:border-slate-800">
+                          <summary className="flex cursor-pointer select-none items-center justify-between gap-3 rounded-xl bg-slate-50 dark:bg-slate-800/50 px-4 py-3 text-sm font-bold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">
+                            <span className="flex items-center gap-2"><BookOpen className="w-4 h-4 text-sky-600 dark:text-sky-400" /> References & Evidence</span>
+                            <ChevronDown className="w-4 h-4 text-slate-500 transition-transform group-open:rotate-180" />
+                          </summary>
+                          <div className="space-y-5 pt-4">
+                            {msg.guidelineSources?.length > 0 && (
+                              <section className="space-y-2">
+                                <h4 className="text-xs font-extrabold uppercase tracking-wider text-sky-700 dark:text-sky-400">Retrieved clinical guidelines</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {msg.guidelineSources.map((source, i) => (
+                                    <div key={`${source.display_name || source.file_name}-${i}`} className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-3">
+                                      <div className="text-xs md:text-sm font-semibold text-slate-800 dark:text-slate-200 break-words">{source.display_name || source.file_name}</div>
+                                      {source.page != null && <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Retrieved page: {source.page}</div>}
+                                    </div>
+                                  ))}
                                 </div>
-                              );
-                            },
-                            thead({ children }) {
-                              return <thead className="bg-slate-100 dark:bg-slate-800/95">{children}</thead>;
-                            },
-                            tbody({ children }) {
-                              return <tbody className="divide-y divide-slate-200 dark:divide-slate-800">{children}</tbody>;
-                            },
-                            tr({ children }) {
-                              return <tr className="even:bg-slate-50/60 dark:even:bg-slate-800/20">{children}</tr>;
-                            },
-                            th({ children }) {
-                              return <th className="px-3.5 md:px-4 py-3.5 text-left align-bottom font-extrabold text-slate-950 dark:text-white border-b border-slate-200 dark:border-slate-700 whitespace-normal">{children}</th>;
-                            },
-                            td({ children }) {
-                              return <td className="px-3.5 md:px-4 py-3.5 align-top text-slate-700 dark:text-slate-300 whitespace-normal break-words [overflow-wrap:anywhere]">{children}</td>;
-                            },
-                            pre({ children }) {
-                              return <>{children}</>;
-                            },
-                            code({ inline, className, children, ...props }) {
-                              const str = String(children).replace(/\n$/, '').trim();
-                              const isMermaid = !inline && (
-                                className?.includes('language-mermaid') ||
-                                className?.includes('mermaid') ||
-                                str.startsWith('flowchart ') ||
-                                str.startsWith('graph ')
-                              );
-                              const isAsciiClinicalPathway = !inline
-                                && /[│├└►→]/.test(str)
-                                && /(stage|grade|therapy|treatment|management|blood pressure|diagnosis|initiate|emergency)/i.test(str);
-
-                              if (isMermaid) return <MermaidDiagram chart={str} />;
-                              if (isAsciiClinicalPathway) return <ClinicalPathwayBlock chart={str} />;
-
-                              if (inline) {
-                                return (
-                                  <code
-                                    className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-sky-700 dark:text-sky-300 text-[0.92em] whitespace-normal break-words"
-                                    {...props}
-                                  >
-                                    {children}
-                                  </code>
-                                );
-                              }
-
-                              return (
-                                <pre className="my-4 max-w-full overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-950 text-slate-100 p-4 text-xs md:text-sm leading-6 whitespace-pre">
-                                  <code className={className} {...props}>{children}</code>
-                                </pre>
-                              );
-                            }
-                          }}
-                        >
-                          {cleanAssistantMarkdown(msg.text)}
-                        </ReactMarkdown>
-                      </div>
-
-                      {msg.pubmedSources?.length > 0 && (
-                        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2.5">
-                          <div className="text-xs font-bold text-indigo-800 dark:text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                            <Microscope className="w-4 h-4" strokeWidth={2.25} /> Live PubMed Citations
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            {msg.pubmedSources.map((p, i) => (
-                              <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" className="min-w-0 p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500 hover:shadow-sm transition-all group">
-                                <div className="flex justify-between items-start gap-2 mb-1.5">
-                                  <strong className="min-w-0 text-slate-900 dark:text-white text-xs md:text-sm line-clamp-2 leading-snug break-words group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors">{p.title}</strong>
-                                  <ExternalLink className="w-4 h-4 text-slate-400 shrink-0" strokeWidth={2.25} />
+                              </section>
+                            )}
+                            {msg.pubmedSources?.length > 0 && (
+                              <section className="space-y-2">
+                                <h4 className="text-xs font-extrabold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">Retrieved PubMed research</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {msg.pubmedSources.map((p, i) => (
+                                    <a key={`${p.pmid || 'pubmed'}-${i}`} href={p.url || (p.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${encodeURIComponent(p.pmid)}/` : undefined)} target="_blank" rel="noopener noreferrer" className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-3 hover:border-sky-400 dark:hover:border-sky-600 transition-colors">
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="text-xs md:text-sm font-semibold text-slate-800 dark:text-slate-200 break-words">{p.title}</div>
+                                        <ExternalLink className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                                      </div>
+                                      <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{p.journal}{p.year ? ` · ${p.year}` : ''}{p.pmid ? ` · PMID ${p.pmid}` : ''}</div>
+                                    </a>
+                                  ))}
                                 </div>
-                                <div className="text-[10px] md:text-xs text-slate-500 dark:text-slate-400">{p.journal} ({p.year}) • <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">PMID: {p.pmid}</span></div>
-                              </a>
-                            ))}
+                              </section>
+                            )}
+                            <p className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">These are retrieved sources for transparency, not proof that every individual sentence has been verified against them.</p>
                           </div>
-                        </div>
+                        </details>
                       )}
                     </div>
                   )}
@@ -1002,7 +1054,7 @@ export default function App() {
                 </div>
               </motion.div>
             )}
-            <div ref={messagesEndRef} />
+            <div />
           </div>
 
           {/* ALWAYS-VISIBLE HIGHLIGHTED SEARCH BAR */}
@@ -1032,10 +1084,9 @@ export default function App() {
             <footer
               className={`bg-white dark:bg-slate-900 border-2 p-2.5 rounded-2xl shadow-elevated transition-all duration-500 ${
                 messages.length === 0
-                  ? 'border-sky-400 dark:border-sky-500 shadow-[0_0_0_4px_rgba(14,165,233,0.15),0_8px_30px_rgba(14,165,233,0.2)] ring-2 ring-sky-400/30 dark:ring-sky-500/40 animate-pulse'
+                  ? 'border-sky-400 dark:border-sky-500 shadow-[0_0_0_4px_rgba(14,165,233,0.15),0_8px_30px_rgba(14,165,233,0.2)] ring-2 ring-sky-400/30 dark:ring-sky-500/40'
                   : 'border-slate-200 dark:border-slate-700'
               }`}
-              style={messages.length === 0 ? { animationDuration: '2.5s' } : undefined}
             >
               <form onSubmit={(e) => { e.preventDefault(); handleSend(); }} className="flex items-stretch gap-2 min-w-0">
                 <input
@@ -1043,7 +1094,6 @@ export default function App() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onFocus={(e) => e.target.parentElement?.parentElement?.classList.remove('animate-pulse')}
                   placeholder="Type your clinical question here..."
                   disabled={loading}
                   autoFocus
