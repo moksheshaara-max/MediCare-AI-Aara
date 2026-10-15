@@ -32,7 +32,6 @@ from retrieval.search import (
 )
 from generation.generator import generate_answer, format_sources, clean_latex_symbols, client, GENERATION_MODEL
 from database.mongo_store import get_stats
-from evaluator.rag_evaluator import evaluate_response_quality
 from google.genai import types
 from memory_diagnostics import log_memory, trace_request
 
@@ -54,6 +53,22 @@ def normalize_assistant_mode_input(value):
     """Normalize the product-facing Clinical Assistant mode."""
     normalized = str(value or "doctor").strip().lower()
     return ASSISTANT_MODE_ALIASES.get(normalized)
+
+
+def _live_rag_evaluation_enabled():
+    """Keep optional research scoring off Render's constrained ONNX runtime.
+
+    An explicit override can enable/disable evaluation for research.  The
+    production default skips the separate BLEU/ROUGE/semantic scoring only
+    when MEDICARE_EMBEDDER_BACKEND=onnx; local Torch evaluation is unchanged.
+    Clinical generation/source checks are performed independently upstream.
+    """
+    override = os.getenv("MEDICARE_LIVE_RAG_EVALUATION", "auto").strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        return True
+    if override in {"0", "false", "no", "off"}:
+        return False
+    return os.getenv("MEDICARE_EMBEDDER_BACKEND", "auto").strip().lower() != "onnx"
 
 
 BOOK_TITLES = {
@@ -204,7 +219,15 @@ def ask():
         )
 
         log_memory("ask.after_generation")
-        eval_metrics = evaluate_response_quality(question, chunks, answer, mode)
+        # Research-only output metrics are not clinical safety checks.
+        # Import the scorer lazily so constrained ONNX workers avoid NLTK/ROUGE
+        # startup allocations and two redundant MPNet inference calls.
+        if _live_rag_evaluation_enabled():
+            from evaluator.rag_evaluator import evaluate_response_quality
+            eval_metrics = evaluate_response_quality(question, chunks, answer, mode)
+        else:
+            eval_metrics = None
+            print("[EVAL] live quality scoring skipped on constrained runtime", flush=True)
         tb_sources_raw, pm_sources = format_sources(chunks, mode, pubmed_papers)
 
         tb_sources = [
