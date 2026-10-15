@@ -49,6 +49,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 from pymongo import MongoClient
 from pymongo.errors import AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError
+from memory_diagnostics import log_memory
 
 
 # -----------------------------------------------------------------------------
@@ -812,6 +813,7 @@ def _load_source_metadata():
     }
 
     retryable = (AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError)
+    log_memory("retrieval.before_metadata_load")
     for attempt in range(3):
         try:
             metadata = {}
@@ -829,6 +831,7 @@ def _load_source_metadata():
 
     _source_metadata_cache = metadata
     _source_metadata_cache_loaded_at = now
+    log_memory("retrieval.after_metadata_load")
     return metadata
 
 
@@ -1932,7 +1935,10 @@ def _vector_search_candidates(query_embedding, candidate_limit: int, num_candida
     retryable = (AutoReconnect, ConnectionFailure, NetworkTimeout, ServerSelectionTimeoutError)
     for attempt in range(3):
         try:
-            return list(collection.aggregate(pipeline))
+            log_memory("retrieval.before_atlas_query")
+            results = list(collection.aggregate(pipeline))
+            log_memory("retrieval.after_atlas_query")
+            return results
         except retryable as exc:
             if attempt == 2:
                 raise
@@ -2760,6 +2766,7 @@ def search_medical_chunks(
     mode = normalize_assistant_mode(assistant_mode)
 
     query_embedding = embed_query(question)
+    log_memory("retrieval.after_embedding")
     if not query_embedding:
         print("Failed to embed query")
         return []

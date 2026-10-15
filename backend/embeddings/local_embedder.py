@@ -15,6 +15,7 @@ Normalize layer. ONNX reproduces those steps, with some quantization variance.
 """
 
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import List, Optional
@@ -25,6 +26,9 @@ MAX_SEQ_LENGTH = 384
 TORCH_CPU_THREADS = int(os.getenv("TORCH_CPU_THREADS", "2"))
 
 _ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from memory_diagnostics import log_memory
 _ASSET_DIR = Path(os.getenv("MEDICARE_MPNet_ASSET_DIR", str(_ROOT / ".runtime_models")))
 _ONNX_FILE = _ASSET_DIR / "onnx" / "model_quint8_avx2.onnx"
 _TOKENIZER_FILE = _ASSET_DIR / "tokenizer.json"
@@ -77,8 +81,10 @@ def _get_onnx_session():
                     f"ONNX MPNet assets missing from {_ASSET_DIR}. "
                     "Run python scripts/download_render_mpnet.py in the build command."
                 )
+            log_memory("onnx.before_imports")
             import onnxruntime as ort
             from tokenizers import Tokenizer
+            log_memory("onnx.after_imports")
             options = ort.SessionOptions()
             options.intra_op_num_threads = 1
             options.inter_op_num_threads = 1
@@ -86,15 +92,18 @@ def _get_onnx_session():
             options.enable_cpu_mem_arena = False
             options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_BASIC
             print("Loading 8-bit ONNX MPNet on CPU", flush=True)
+            log_memory("onnx.before_session")
             session = ort.InferenceSession(
                 str(_ONNX_FILE), sess_options=options,
                 providers=["CPUExecutionProvider"]
             )
+            log_memory("onnx.after_session")
             tokenizer = Tokenizer.from_file(str(_TOKENIZER_FILE))
             tokenizer.enable_truncation(max_length=MAX_SEQ_LENGTH)
             _onnx_tokenizer = tokenizer
             _onnx_session = session
             print("ONNX MPNet ready (768-D)", flush=True)
+            log_memory("onnx.ready")
     return _onnx_session, _onnx_tokenizer
 
 
@@ -121,7 +130,9 @@ def _encode_onnx_one(text: str) -> List[float]:
             raise RuntimeError(f"Unrecognized ONNX MPNet input: {key}")
 
     names = [output.name for output in session.get_outputs()]
+    log_memory("onnx.before_inference")
     states = session.run(None, feed)
+    log_memory("onnx.after_inference")
     # The exported sentence-transformers transformer produces a 3-D
     # last_hidden_state, not already-pooled sentence embeddings.
     idx = names.index("last_hidden_state") if "last_hidden_state" in names else 0
